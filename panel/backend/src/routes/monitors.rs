@@ -809,8 +809,9 @@ pub async fn certificate_dashboard(
     // was told "SSL — 2 certs, expires in 9 days" and then met "Admin access
     // required" over "No SSL certificates found" on the page the tile points at.
     // One of those two screens was lying about the same rows; it was this one.
-    let certs: Vec<(uuid::Uuid, String, bool, Option<chrono::DateTime<chrono::Utc>>)> = sqlx::query_as(
-        "SELECT id, domain, ssl_enabled, ssl_expiry FROM sites WHERE user_id = $1 AND ssl_enabled = true ORDER BY ssl_expiry ASC NULLS LAST"
+    type SiteCertRow = (uuid::Uuid, String, bool, Option<chrono::DateTime<chrono::Utc>>, Option<chrono::DateTime<chrono::Utc>>);
+    let certs: Vec<SiteCertRow> = sqlx::query_as(
+        "SELECT id, domain, ssl_enabled, ssl_expiry, ssl_renewal_at FROM sites WHERE user_id = $1 AND ssl_enabled = true ORDER BY ssl_expiry ASC NULLS LAST"
     ).bind(claims.sub).fetch_all(&state.db).await.map_err(|e| internal_error("certificate list", e))?;
 
     // A certificate whose expiry the panel does not know is `unknown`, not `ok`.
@@ -823,14 +824,19 @@ pub async fn certificate_dashboard(
     // exactly the certificate nobody renews for you. `999` also flowed into the
     // page's own countdown column, printing a confident "999d".
     let now = chrono::Utc::now();
-    let ids: Vec<Uuid> = certs.iter().map(|(id, _, _, _)| *id).collect();
+    let ids: Vec<Uuid> = certs.iter().map(|(id, _, _, _, _)| *id).collect();
     let failing = renewal_failing_sites(&state.db, &ids).await?;
-    let mut items: Vec<serde_json::Value> = certs.iter().map(|(id, domain, _, expiry)| {
+    let mut items: Vec<serde_json::Value> = certs.iter().map(|(id, domain, _, expiry, renewal_at)| {
         let days_left = expiry.map(|e| (e - now).num_days());
         // `stack_id` is null on every site row: the field is still always on the
         // wire, so the page that consumes this list never sees it appear and
         // disappear between a site row and a stack row.
-        serde_json::json!({ "site_id": id, "stack_id": serde_json::Value::Null, "domain": domain, "expiry": expiry, "days_left": days_left, "status": expiry_status(days_left, failing.contains(id)) })
+        //
+        // `renewal_at` is the CA-suggested ARI renewal window start (RFC 9773),
+        // fetched and stored by the auto-healer's renewal cycle. Always on the
+        // wire (null on a stack row, or a site row the healer hasn't checked
+        // yet) for the same reason `stack_id` is — see above.
+        serde_json::json!({ "site_id": id, "stack_id": serde_json::Value::Null, "domain": domain, "expiry": expiry, "days_left": days_left, "status": expiry_status(days_left, failing.contains(id)), "renewal_at": renewal_at })
     }).collect();
 
     // The caller's own Docker Compose stacks. `certificate_dashboard_for_admin`
@@ -882,6 +888,10 @@ pub async fn certificate_dashboard(
                     &crate::services::security_scanner::stack_renewal_state_key(domain),
                 ),
             ),
+            // `docker_stacks` has no ssl_renewal_at column — ARI is only tracked
+            // per `sites` row today. Always on the wire, null here, for the same
+            // reason `site_id` is null on a stack row.
+            "renewal_at": serde_json::Value::Null,
         })
     }));
 
@@ -920,9 +930,10 @@ pub async fn certificate_dashboard_for_admin(
     AdminUser(_claims): AdminUser,
     ServerScope(server_id, agent): ServerScope,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let certs: Vec<(uuid::Uuid, String, Option<chrono::DateTime<chrono::Utc>>, Option<String>)> =
+    type AdminCertRow = (uuid::Uuid, String, Option<chrono::DateTime<chrono::Utc>>, Option<String>, Option<chrono::DateTime<chrono::Utc>>);
+    let certs: Vec<AdminCertRow> =
         sqlx::query_as(
-            "SELECT s.id, s.domain, s.ssl_expiry, u.email AS owner_email \
+            "SELECT s.id, s.domain, s.ssl_expiry, u.email AS owner_email, s.ssl_renewal_at \
              FROM sites s LEFT JOIN users u ON u.id = s.user_id \
              WHERE s.server_id = $1 AND s.ssl_enabled = true \
              ORDER BY s.ssl_expiry ASC NULLS LAST",
@@ -933,11 +944,11 @@ pub async fn certificate_dashboard_for_admin(
         .map_err(|e| internal_error("admin certificate list", e))?;
 
     let now = chrono::Utc::now();
-    let ids: Vec<Uuid> = certs.iter().map(|(id, _, _, _)| *id).collect();
+    let ids: Vec<Uuid> = certs.iter().map(|(id, _, _, _, _)| *id).collect();
     let failing = renewal_failing_sites(&state.db, &ids).await?;
     let mut items: Vec<serde_json::Value> = certs
         .iter()
-        .map(|(id, domain, expiry, owner)| {
+        .map(|(id, domain, expiry, owner, renewal_at)| {
             let days_left = expiry.map(|e| (e - now).num_days());
             serde_json::json!({
                 "site_id": id,
@@ -952,6 +963,9 @@ pub async fn certificate_dashboard_for_admin(
                 "status": expiry_status(days_left, failing.contains(id)),
                 "owner_email": owner,
                 "managed": true,
+                // CA-suggested ARI renewal window start (RFC 9773). `sites`-only
+                // column — see the site-scoped dashboard above for the same note.
+                "renewal_at": renewal_at,
             })
         })
         .collect();
@@ -1021,7 +1035,7 @@ pub async fn certificate_dashboard_for_admin(
     let host_scan = match agent.get("/ssl/certificates").await {
         Ok(v) => {
             let known: std::collections::HashSet<&str> =
-                certs.iter().map(|(_, d, _, _)| d.as_str()).collect();
+                certs.iter().map(|(_, d, _, _, _)| d.as_str()).collect();
             if let Some(arr) = v.as_array() {
                 for c in arr {
                     let Some(domain) = c.get("domain").and_then(|d| d.as_str()) else { continue };
@@ -1079,6 +1093,7 @@ pub async fn certificate_dashboard_for_admin(
                         // ACME stack: nothing here can renew or remove it, and the
                         // page says so rather than offering a control that fails.
                         "managed": false,
+                        "renewal_at": serde_json::Value::Null,
                     }));
                 }
             }
@@ -1124,6 +1139,7 @@ pub async fn certificate_dashboard_for_admin(
                     "managed": true,
                     // The one thing this row must not do is look like a live read.
                     "stale": true,
+                    "renewal_at": serde_json::Value::Null,
                 }));
             }
             false

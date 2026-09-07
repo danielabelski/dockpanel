@@ -20,6 +20,8 @@ interface Certificate {
   managed?: boolean;
   /** true = read back out of the panel's own record because the agent could not be reached. */
   stale?: boolean;
+  /** CA-suggested ARI renewal window start (RFC 9773), or null if not yet checked / not a site row. */
+  renewal_at?: string | null;
 }
 
 // Exported so the registry section below the site table paints the SAME badge
@@ -232,6 +234,20 @@ export default function Certificates() {
                       <span className={cert.days_left === null ? "text-dark-300" : cert.days_left <= 7 ? "text-danger-400 font-bold" : cert.days_left <= 30 ? "text-warn-400" : "text-dark-100"}>
                         {cert.days_left === null ? "—" : cert.days_left < 0 ? `${Math.abs(cert.days_left)}d overdue` : `${cert.days_left}d`}
                       </span>
+                      {/* The CA's own suggested renewal window (RFC 9773 ARI) — a
+                          date the auto-healer already fetches, stores and acts on,
+                          just never showed. Distinct from "days left": ARI often
+                          opens weeks before expiry, so an operator watching only
+                          the countdown has no way to see the window the healer is
+                          actually waiting for. */}
+                      {cert.renewal_at && (
+                        <div
+                          className="text-[10px] text-dark-300 font-mono mt-0.5"
+                          title="The Certificate Authority's suggested renewal window (ACME Renewal Information). DockPanel's auto-healer renews automatically once this window opens — this is not a deadline you need to act on."
+                        >
+                          CA suggests renewal {new Date(cert.renewal_at) <= new Date() ? "now" : `~${new Date(cert.renewal_at).toLocaleDateString()}`}
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${style.bg} ${style.text}`}>

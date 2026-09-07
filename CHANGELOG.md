@@ -4,6 +4,36 @@ All notable changes to DockPanel will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.233.0]
+
+### Two buried capabilities surfaced (Mode B research quick wins)
+
+First-ever Mode B feature-research pass (5 parallel research agents: GitHub open issues, competitor
+refresh, 2026 trend scan, buried-capabilities re-check, then a synthesis pass) with both loose-ends
+audits fully closed and no repair backlog left. Ovidiu picked the two lowest-risk items from the
+resulting shortlist — both already fully built on the backend, just never rendered.
+
+**CA-suggested SSL renewal window (ACME ARI, RFC 9773)** — the auto-healer has fetched, stored and
+acted on this date since v2.7.17; `sites.ssl_renewal_at` was never read by anything the Certificates
+page's own SQL selected. `certificate_dashboard` and `certificate_dashboard_for_admin` now select and
+forward it; the Certificates page shows "CA suggests renewal ~{date}" under the days-left column for
+any site-backed certificate the healer has already checked (Docker Compose stacks have no
+`ssl_renewal_at` column and keep this null, same as they already did for other site-only fields).
+
+**Suspicious-events timeline** — `record_suspicious_event[_at]` has written a real per-event row
+(proxy/datacenter login, staging-clone abuse, deploy anomaly) to `suspicious_events` since the
+2026-03-24 security-hardening migration; the only reader anywhere was a bare `COUNT(*)` used to trip
+the auto-lockdown threshold. New `GET /api/security/suspicious-events` (admin-only, same
+limit/offset shape as the existing audit-log endpoint) and a table on the Security page's Lockdown
+tab, directly above the Immutable Audit Log it complements — "why lockdown is close to firing" next
+to "what already happened".
+
+One new HTTP route (829 → 830 backend). Verified: backend 474/474 tests, clippy 426 warnings (one
+below the 427 baseline — the new `suspicious_events_list` query and the two extended certificate
+queries were factored into named tuple type aliases rather than left as bare 5/6-element tuples),
+release build clean, frontend `tsc -b --noEmit` + `vite build` clean, `docs-claims-pin-e2e.sh`
+201/201 (route count re-derived and corrected), full 131-suite `tests/*-pin-e2e.sh` sweep green.
+
 ## [2.232.0]
 
 ### Closed the 3 findings the second Loose-Ends Audit (v2.231.0) left as product decisions

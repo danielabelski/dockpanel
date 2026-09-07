@@ -155,6 +155,20 @@ interface AuditLogEntry {
   created_at: string;
 }
 
+// The feed that trips auto-lockdown. Written by `record_suspicious_event[_at]`
+// (proxy/datacenter logins, staging-clone abuse, deploy anomalies) since the
+// 2026-03-24 security-hardening migration — until now the only reader
+// anywhere was a bare COUNT() against the threshold, so an admin could see
+// lockdown fire and never see what actually happened.
+interface SuspiciousEvent {
+  id: string;
+  event_type: string;
+  actor_email: string | null;
+  actor_ip: string | null;
+  details: string | null;
+  created_at: string;
+}
+
 interface RecordingEntry {
   filename: string;
   size_bytes: number;
@@ -313,6 +327,7 @@ export default function Security() {
   // Security Hardening state (consolidated from SecurityHardening.tsx)
   const [lockdown, setLockdown] = useState<LockdownStatus | null>(null);
   const [auditLog, setAuditLog] = useState<AuditLogEntry[]>([]);
+  const [suspiciousEvents, setSuspiciousEvents] = useState<SuspiciousEvent[]>([]);
   const [recordings, setRecordings] = useState<RecordingEntry[]>([]);
   const [pendingUsers, setPendingUsers] = useState<PendingUser[]>([]);
   const [unverifiedUsers, setUnverifiedUsers] = useState<UnverifiedUser[]>([]);
@@ -346,6 +361,7 @@ export default function Security() {
       // Load hardening data (consolidated from SecurityHardening.tsx)
       api.get<LockdownStatus>("/security/lockdown").then(setLockdown).catch(() => {});
       api.get<AuditLogEntry[]>("/security/audit-log?limit=50").then(setAuditLog).catch(() => {});
+      api.get<SuspiciousEvent[]>("/security/suspicious-events?limit=50").then(setSuspiciousEvents).catch(() => {});
       api.get<{ recordings: RecordingEntry[] }>("/security/recordings").then(d => setRecordings(d.recordings || [])).catch(() => {});
       api.get<PendingUser[]>("/security/pending-users").then(setPendingUsers).catch(() => {});
       api.get<UnverifiedUser[]>("/security/unverified-users").then(setUnverifiedUsers).catch(() => {});
@@ -1679,6 +1695,36 @@ export default function Security() {
             <div className="text-xs text-dark-400 space-y-1">
               <p>When locked: terminals disabled, registration blocked, non-admin logins blocked.</p>
               <p>Auto-expires after 24 hours. Panic button also activates lockdown.</p>
+            </div>
+          </div>
+
+          {/* Suspicious Events — the feed the threshold above actually counts.
+              Sits ahead of the immutable audit log on purpose: this is the
+              "why is lockdown close to firing" narrative, the log below is
+              the "what already happened" record. */}
+          <div className="bg-dark-800 rounded-lg border border-dark-500 overflow-hidden">
+            <div className="px-5 py-3 border-b border-dark-600">
+              <h3 className="text-xs font-medium text-dark-300 uppercase font-mono tracking-widest">Suspicious Events</h3>
+              <p className="text-xs text-dark-200 mt-0.5">Events counted toward the auto-lockdown threshold above — proxy/datacenter logins, staging-clone abuse, deploy anomalies.</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead><tr className="border-b border-dark-600 text-left text-xs font-mono text-dark-400 uppercase">
+                  <th className="px-4 py-2">Event</th><th className="px-4 py-2">Details</th><th className="px-4 py-2">Actor</th><th className="px-4 py-2">IP</th><th className="px-4 py-2">Time</th>
+                </tr></thead>
+                <tbody>
+                  {suspiciousEvents.map((e) => (
+                    <tr key={e.id} className="border-b border-dark-700 hover:bg-dark-700 align-top">
+                      <td className="px-4 py-2 font-mono text-dark-200">{e.event_type}</td>
+                      <td className="px-4 py-2 text-xs text-dark-300 max-w-[24rem] break-words" title={e.details || undefined}>{e.details || <span className="text-dark-400">-</span>}</td>
+                      <td className="px-4 py-2 text-dark-300">{e.actor_email || "-"}</td>
+                      <td className="px-4 py-2 text-dark-400 font-mono text-xs">{e.actor_ip || "-"}</td>
+                      <td className="px-4 py-2 text-dark-400 text-xs whitespace-nowrap">{new Date(e.created_at).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                  {suspiciousEvents.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-dark-400">No suspicious events recorded</td></tr>}
+                </tbody>
+              </table>
             </div>
           </div>
 

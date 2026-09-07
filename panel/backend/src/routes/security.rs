@@ -1165,6 +1165,45 @@ pub async fn audit_log_list(
     Ok(Json(result))
 }
 
+/// GET /api/security/suspicious-events — Query the suspicious-event feed that
+/// feeds auto-lockdown.
+///
+/// `security_hardening::record_suspicious_event[_at]` has written a real,
+/// per-event row to `suspicious_events` since the 2026-03-24 security-hardening
+/// migration — a proxy/datacenter login, a staging-clone abuse pattern, a
+/// deploy anomaly — but the only reader anywhere was a bare `COUNT(*)` used to
+/// trip the lockdown threshold. An admin could see the threshold fire and
+/// never see what actually happened; this is the same table
+/// `audit_log_list` above already renders a page for, just for suspicious
+/// events instead of the immutable security log.
+pub async fn suspicious_events_list(
+    State(state): State<AppState>,
+    AdminUser(_claims): AdminUser,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<Vec<serde_json::Value>>, ApiError> {
+    let limit: i64 = params.get("limit").and_then(|v| v.parse().ok()).unwrap_or(100).min(500);
+    let offset: i64 = params.get("offset").and_then(|v| v.parse().ok()).unwrap_or(0);
+
+    type SuspiciousEventRow = (uuid::Uuid, String, Option<String>, Option<String>, Option<String>, chrono::DateTime<chrono::Utc>);
+    let rows: Vec<SuspiciousEventRow> =
+        sqlx::query_as(
+            "SELECT id, event_type, actor_email, actor_ip, details, created_at \
+             FROM suspicious_events ORDER BY created_at DESC LIMIT $1 OFFSET $2",
+        )
+        .bind(limit).bind(offset)
+        .fetch_all(&state.db).await
+        .map_err(|e| internal_error("suspicious events list", e))?;
+
+    let result: Vec<serde_json::Value> = rows.iter().map(|r| {
+        serde_json::json!({
+            "id": r.0, "event_type": r.1, "actor_email": r.2, "actor_ip": r.3,
+            "details": r.4, "created_at": r.5,
+        })
+    }).collect();
+
+    Ok(Json(result))
+}
+
 /// GET /api/security/recordings — List terminal session recordings (Feature 5).
 pub async fn recordings_list(
     State(_state): State<AppState>,

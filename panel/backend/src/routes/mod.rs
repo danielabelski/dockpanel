@@ -1306,6 +1306,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/security/panic", post(security::panic_button))
         .route("/api/security/forensic-snapshot", post(security::forensic_snapshot))
         .route("/api/security/audit-log", get(security::audit_log_list))
+        .route("/api/security/suspicious-events", get(security::suspicious_events_list))
         .route("/api/security/recordings", get(security::recordings_list))
         .route("/api/security/pending-users", get(security::pending_users))
         .route("/api/security/users/{id}/approve", post(security::approve_user))
