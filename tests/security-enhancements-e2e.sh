@@ -104,9 +104,6 @@ test_it "suspicious_events table exists" \
 test_it "terminal_recordings table exists" \
     "docker exec dockpanel-postgres psql -U dockpanel -d dockpanel -c 'SELECT 1 FROM terminal_recordings LIMIT 0'"
 
-test_it "canary_files table exists" \
-    "docker exec dockpanel-postgres psql -U dockpanel -d dockpanel -c 'SELECT 1 FROM canary_files LIMIT 0'"
-
 test_it "users.approved column exists" \
     "docker exec dockpanel-postgres psql -U dockpanel -d dockpanel -c 'SELECT approved FROM users LIMIT 0'"
 

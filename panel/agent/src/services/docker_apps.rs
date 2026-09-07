@@ -4809,6 +4809,13 @@ async fn blue_green_update(
     domain: &str,
     old_port: u16,
 ) -> Result<UpdateResult, String> {
+    // Held for the full duration — every `swap_nginx_proxy_port` call below
+    // (temp-port swap, and every rollback-to-old-port arm) writes the same
+    // `{sites_dir()}/{domain}.conf` file `expose_domain`/`unexpose_domain`
+    // now also lock. Single call site (update_app), no lock held by the
+    // caller, so this cannot nest/deadlock. See site_lock's module doc.
+    let _guard = crate::site_lock::lock_site(domain).await;
+
     let temp_port = find_free_port()?;
     tracing::info!(
         "Blue-green update for {name}: old_port={old_port}, temp_port={temp_port}"

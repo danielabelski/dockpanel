@@ -333,6 +333,11 @@ async fn expose_domain(
     use_traefik: bool,
     response: &mut serde_json::Value,
 ) {
+    // Held for the full duration — this writes the same `nginx::vhost_target`
+    // path `ssl::enable_ssl_for_site` and `unexpose_domain` also write/delete,
+    // with no coordination before this fix. See site_lock's module doc.
+    let _guard = crate::site_lock::lock_site(domain).await;
+
     if use_traefik {
         // --- Traefik mode: write a dynamic route config file ---
         if let TlsIntent::Provided { alias } = tls {
@@ -629,6 +634,10 @@ async fn expose_domain(
 /// with the Compose-stack teardown so a stack cannot grow a second, unguarded
 /// copy of the same deletes.
 async fn unexpose_domain(domain: &str, host_port: Option<u16>, response: &mut serde_json::Value) {
+    // Held for the full duration — see expose_domain's matching guard and
+    // site_lock's module doc for why removal must not interleave with a
+    // concurrent expose/update on the same domain.
+    let _guard = crate::site_lock::lock_site(domain).await;
 
     // Remove Traefik dynamic route config (if it exists). The legacy-name
     // leg inside checks ownership itself.

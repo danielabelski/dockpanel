@@ -1391,8 +1391,6 @@ pub fn router() -> Router<AppState> {
         .route("/api/dns/zones/{id}/analytics", get(dns::dns_analytics))
         .route("/api/dns/zones/{id}/cf/settings", get(dns::cf_zone_settings).put(dns::cf_update_setting))
         .route("/api/dns/zones/{id}/cf/cache/purge", post(dns::cf_purge_cache))
-        .route("/api/tunnel/configure", post(dns::configure_tunnel))
-        .route("/api/tunnel/status", get(dns::tunnel_status))
         // WordPress Toolkit
         .route("/api/wordpress/sites", get(wordpress::all_wp_sites))
         .route("/api/wordpress/bulk-update", post(wordpress::bulk_update))
@@ -1489,8 +1487,11 @@ pub fn router() -> Router<AppState> {
         // /api/agent/version demanded `AuthUser`, a credential an agent cannot
         // hold; it 401'd on every request for four releases and the comment is a
         // large part of why nobody looked (s233). So, precisely:
-        //   /api/agent/version, /api/agent/commands, /api/agent/commands/result
+        //   /api/agent/version
         //     -> crate::auth::authenticate_agent + agent_rate_limit
+        //     (the remote-command channel this comment used to also name,
+        //     /api/agent/commands + /api/agent/commands/result, was removed —
+        //     it could never execute a command)
         //   /api/agent/checkin
         //     -> its OWN check (agent_checkin.rs): the server_id comes from the
         //        request BODY, the row is fetched by id, and the token is

@@ -791,6 +791,47 @@ export default function BackupOrchestrator() {
 
 // ── Overview Tab ──────────────────────────────────────────────────────────
 
+function StorageHistorySparkline() {
+  const [points, setPoints] = useState<{ date: string; total_mb: number }[]>([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    api.get<{ date: string; total_mb: number }[]>("/backup-orchestrator/storage-history")
+      .then(data => setPoints(data || []))
+      .catch(() => setPoints([]))
+      .finally(() => setLoaded(true));
+  }, []);
+
+  if (!loaded || points.length < 2) return null;
+
+  const width = 320;
+  const height = 48;
+  const max = Math.max(...points.map(p => p.total_mb), 1);
+  const min = Math.min(...points.map(p => p.total_mb), 0);
+  const range = Math.max(max - min, 1);
+  const step = width / (points.length - 1);
+  const coords = points.map((p, i) => {
+    const x = i * step;
+    const y = height - ((p.total_mb - min) / range) * height;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const first = points[0];
+  const last = points[points.length - 1];
+
+  return (
+    <div className="bg-dark-800 rounded-lg border border-dark-500 p-4">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs text-dark-300 uppercase font-mono tracking-widest">Storage Growth (30d)</p>
+        <p className="text-xs text-dark-300 font-mono">{first.date} → {last.date}</p>
+      </div>
+      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-12" preserveAspectRatio="none">
+        <polyline points={coords.join(" ")} fill="none" stroke="currentColor" strokeWidth={2} className="text-rust-400" />
+      </svg>
+      <p className="text-xs text-dark-300 mt-1">{formatSize(last.total_mb * 1_048_576)} current &middot; {formatSize(max * 1_048_576)} peak</p>
+    </div>
+  );
+}
+
 function OverviewTab({ health }: { health: BackupHealth }) {
   const cards = [
     { label: "Site Backups", value: health.total_site_backups, color: "text-rust-400" },
@@ -816,6 +857,8 @@ function OverviewTab({ health }: { health: BackupHealth }) {
           </div>
         ))}
       </div>
+
+      <StorageHistorySparkline />
 
       {/* Stale Backups Warning */}
       {health.stale_backups.length > 0 && (

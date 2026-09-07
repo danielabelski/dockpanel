@@ -21,6 +21,15 @@ interface DiagnosticReport {
   };
 }
 
+interface Recommendation {
+  category: string;
+  severity: string;
+  title: string;
+  description: string;
+  current: string;
+  recommended: string;
+}
+
 const severityColors: Record<string, { bg: string; text: string; dot: string }> = {
   critical: { bg: "bg-danger-500/10", text: "text-danger-400", dot: "bg-danger-500" },
   warning: { bg: "bg-warn-500/10", text: "text-warn-400", dot: "bg-warn-500" },
@@ -34,6 +43,8 @@ const categoryLabels: Record<string, string> = {
   ssl: "SSL Certificates",
   logs: "Log Analysis",
   security: "Security",
+  php: "PHP",
+  system: "System",
 };
 
 export default function Diagnostics() {
@@ -42,6 +53,8 @@ export default function Diagnostics() {
   const [fixing, setFixing] = useState<string | null>(null);
   const [fixResults, setFixResults] = useState<Record<string, { ok: boolean; msg: string }>>({});
   const [filter, setFilter] = useState<string>("all");
+  const [recommendations, setRecommendations] = useState<Recommendation[] | null>(null);
+  const [recsLoading, setRecsLoading] = useState(false);
 
   const runDiagnostics = async () => {
     setLoading(true);
@@ -66,6 +79,18 @@ export default function Diagnostics() {
       setFixResults((prev) => ({ ...prev, [findingId]: { ok: false, msg } }));
     } finally {
       setFixing(null);
+    }
+  };
+
+  const runRecommendations = async () => {
+    setRecsLoading(true);
+    try {
+      const data = await api.get<{ recommendations: Recommendation[] }>("/agent/recommendations");
+      setRecommendations(data.recommendations || []);
+    } catch {
+      setRecommendations(null);
+    } finally {
+      setRecsLoading(false);
     }
   };
 
@@ -160,6 +185,64 @@ export default function Diagnostics() {
           <p className="text-dark-300 mt-1">No issues detected on your server.</p>
         </div>
       )}
+
+      {/* Auto-Optimization Recommendations */}
+      <div className="mb-6">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-dark-300 uppercase tracking-wider font-mono">
+            Auto-Optimization Recommendations
+          </h2>
+          <button
+            onClick={runRecommendations}
+            disabled={recsLoading}
+            className="px-3 py-1.5 text-sm bg-dark-800 hover:bg-dark-700 border border-dark-500 text-dark-200 rounded-lg transition-colors disabled:opacity-50"
+          >
+            {recsLoading ? "Analyzing..." : recommendations === null ? "Analyze" : "Re-analyze"}
+          </button>
+        </div>
+
+        {recommendations === null && !recsLoading && (
+          <p className="text-sm text-dark-300 font-mono">
+            Check PHP-FPM pool sizing, OPcache, nginx workers, and disk usage against this server's actual resources.
+          </p>
+        )}
+
+        {recommendations !== null && recommendations.length === 0 && (
+          <div className="text-center py-8 bg-dark-900 rounded-lg border border-dark-500">
+            <p className="text-dark-300 text-sm">No optimization suggestions — current settings look sized correctly.</p>
+          </div>
+        )}
+
+        {recommendations !== null && recommendations.length > 0 && (
+          <div className="space-y-2">
+            {recommendations.map((rec, i) => {
+              const colors = severityColors[rec.severity] ?? severityColors.info;
+              return (
+                <div key={i} className="p-4 rounded-lg border border-dark-500 bg-dark-900">
+                  <div className="flex items-start gap-3">
+                    <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${colors.dot}`} />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium text-dark-50">{rec.title}</span>
+                        <span className={`text-xs px-1.5 py-0.5 rounded ${colors.bg} ${colors.text}`}>
+                          {rec.severity}
+                        </span>
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-dark-700 text-dark-300">
+                          {categoryLabels[rec.category] ?? rec.category}
+                        </span>
+                      </div>
+                      <p className="text-sm text-dark-300 mt-1 font-mono">{rec.description}</p>
+                      <p className="text-xs text-dark-400 mt-1 font-mono">
+                        Current: {rec.current} &middot; Recommended: {rec.recommended}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       {/* Findings grouped by category */}
       {Object.entries(grouped).map(([category, items]) => (

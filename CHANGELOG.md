@@ -4,6 +4,83 @@ All notable changes to DockPanel will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.231.0]
+
+### Second Loose-Ends Audit — 15 confirmed findings closed in one release
+
+p209 (the first-ever Loose-Ends Audit, v2.223.0) closed fully at v2.230.0 after 7 sessions. This is
+the second pass over the whole tree: 6 finder dimensions swept in parallel, then every candidate was
+REFUTE-verified against current source before being trusted. 20 candidates verified — 18 confirmed
+real, 2 refuted (a self-documented placeholder column, and an "unused" SBOM API that's actually
+documented for external consumers). Of the 18, 15 were mechanical closures shipped this release; 3
+are genuine product decisions left open (see below).
+
+**Fixed — two real concurrency bugs, not just completeness gaps.** Docker-app domain
+exposure/teardown (`expose_domain`/`unexpose_domain`), the blue-green update proxy swap, and volume
+restore never got wired into `site_lock` when that module was built (v2.182.0) to serialize
+domain-keyed site mutations — they write/delete the exact same `nginx::vhost_target` files
+SSL/WordPress/staging/git-deploy already lock, and volume restore does an unconditional rm-rf +
+extract against a live, potentially-mounted Docker volume with zero coordination. Separately,
+`site_lock.rs`'s own "every operation" invariant was false: the single-file restore route
+(`routes/backups.rs::restore_file`) skipped the lock its sibling full-restore route takes (reachable
+only via a direct agent API call today, not through the panel UI). All five call sites now take the
+same domain/volume-keyed lock as their siblings.
+
+**Fixed — Deploy.tsx's `Promise.all` erased a working config on an unrelated failure.** Two
+independent GETs (deploy config, deploy logs) were bundled in one `Promise.all`; a logs-fetch
+failure alone fell into a bare catch that never set `config`, making a genuinely-configured site
+look unconfigured. This is the identical mistake Databases.tsx's own code comment documents as
+having caused a real 5-month dead UI pane before being fixed there with `Promise.allSettled` — that
+fix was never carried to this sibling call site. Fixed the same way here.
+
+**Fixed — silent alert-delivery failures.** PagerDuty logged nothing at all on send failure, at
+either call site; Slack/Discord/generic-webhook only ever logged an SSRF-guard block, never the
+actual HTTP outcome. All four now log a warning on a non-2xx response or transport error, matching
+the email channel's existing behavior. Telemetry's Events tab and CDN's zone list both rendered a
+load failure identically to "nothing to show" — both now surface the failure instead.
+
+**Fixed — CLI docs stale since v2.221.0.** `docs/cli-reference.md` and `docs/guides/backups.md`
+both still said a database-bearing restore "fails" from the CLI; that's been false since
+`cmd_backup_restore` gained a `backend.token`-gated full restore path. Both now describe it
+accurately, with the files-only caveat scoped to the no-key fallback.
+
+**Wired four dead-but-real endpoints into their obvious UI:** a container shell-availability probe
+(`has_bash`/`has_sh`) now runs before the Apps shell modal accepts input, instead of every exec
+attempt on a distroless image failing blind; a real 30-day backup-storage trend
+(`backup-orchestrator/storage-history`) now renders as a sparkline (hand-rolled inline SVG — no new
+chart dependency); the one CDN pull-zones endpoint without a caller now has a Pull Zones panel; the
+fully-built Auto-Optimization recommendations endpoint (PHP-FPM/nginx-worker/swap tuning) now has a
+panel on the Diagnostics page.
+
+**Removed dead code rather than leave it disclosed-but-live:**
+- The Cloudflare Tunnel token-config routes (`configure_tunnel`/`tunnel_status`) and the
+  write-only `tunnel_configured` settings key — FEATURES.md's own Withdrawn Claims table already
+  documented this as a decided "will not build a UI" case since 2026-08-16; the code itself is now
+  gone too, matching the treatment Restic and Stripe billing already got.
+- The orphaned `canary_files` table (migration `20260907000000_drop_canary_files_table.sql`) —
+  zero application-code readers or writers; the real canary-file feature persists state via
+  `settings` rows instead. Its sibling table from the same migration, `suspicious_events`, is
+  fully wired end-to-end.
+- `pages/SecurityHardening.tsx`, a fully-built standalone component with zero imports anywhere —
+  its four siblings were consolidated into `Security.tsx` at the time; this one was left behind.
+- A stale `routes/mod.rs` comment still enumerating two agent routes removed in a past release.
+
+**Deferred to a product decision, not closed this release** (each a real wire-vs-drop call):
+`container_expected_stops.actor_email` (captured on every stop, never surfaced — wire it into the
+Apps tooltip, or drop the column); `on_call::whoami` (built for non-admin self-service, but the
+entire on-call UI is admin-gated); `sites::health_summary` (a real 0-100 composite SSL/backup/uptime
+score with no UI reader). See FEATURES.md-style framing in the tech-debt ledger.
+
+Doc-claims figures updated for the net code change: HTTP routes 831 → 829 (539 backend + 290 agent,
+2 Cloudflare Tunnel routes removed), Frontend pages 53 → 52 (SecurityHardening.tsx deleted), DB
+migrations 132 → 133 (the new canary_files-drop migration). Two pin suites' `canary_files table
+exists` assertions removed (`full-e2e.sh`, `security-enhancements-e2e.sh`) since the table no longer
+exists. Verified: agent 336/336 tests + 137 clippy warnings (baseline unchanged), backend 474/474
+tests + 427 clippy warnings (baseline unchanged), both release builds clean, `cargo audit` clean
+(same pre-existing allow-listed advisories), frontend `tsc -b && vite build` clean, `mdbook build
+docs/` clean, all 131 `tests/*-pin-e2e.sh` suites green including `docs-claims-pin-e2e.sh` itself
+(201/201).
+
 ## [2.230.0]
 
 ### Withdrawn — Restic incremental backups (API only)

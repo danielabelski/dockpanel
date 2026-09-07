@@ -209,7 +209,6 @@ test_it "SELECT 1 FROM security_audit_log LIMIT 0" "security_audit_log table exi
 test_it "SELECT active FROM lockdown_state WHERE id = 1" "lockdown_state table exists"
 test_it "SELECT 1 FROM suspicious_events LIMIT 0" "suspicious_events table exists"
 test_it "SELECT 1 FROM terminal_recordings LIMIT 0" "terminal_recordings table exists"
-test_it "SELECT 1 FROM canary_files LIMIT 0" "canary_files table exists"
 test_it "SELECT approved FROM users LIMIT 0" "users.approved column exists"
 test_it "SELECT sha256_hash FROM backups LIMIT 0" "backups.sha256_hash column exists"
 

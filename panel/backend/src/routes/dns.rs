@@ -6,8 +6,8 @@ use axum::{
 };
 use uuid::Uuid;
 
-use crate::auth::{AuthUser, ServerScope};
-use crate::error::{ApiError, agent_error, err, internal_error, require_admin, upstream_error};
+use crate::auth::AuthUser;
+use crate::error::{ApiError, err, internal_error, require_admin, upstream_error};
 use crate::services::activity;
 use crate::AppState;
 
@@ -1627,61 +1627,6 @@ pub async fn cf_purge_cache(
         "ok": true,
         "purge_type": purge_type,
     })))
-}
-
-/// POST /api/tunnel/configure — Configure Cloudflare Tunnel with token.
-pub async fn configure_tunnel(
-    State(state): State<AppState>,
-    AuthUser(claims): AuthUser,
-    ServerScope(_server_id, agent): ServerScope,
-    Json(body): Json<serde_json::Value>,
-) -> Result<Json<serde_json::Value>, ApiError> {
-    require_admin(&claims.role)?;
-
-    let token = body.get("token").and_then(|v| v.as_str()).unwrap_or("");
-    if token.is_empty() {
-        return Err(err(StatusCode::BAD_REQUEST, "Missing tunnel token"));
-    }
-
-    let result = agent
-        .post("/services/cloudflared/configure", Some(serde_json::json!({ "token": token })))
-        .await
-        .map_err(|e| agent_error("Tunnel configure", e))?;
-
-    // Mark the tunnel as configured — a boolean display flag only. The tunnel token
-    // itself lives exclusively on the agent (in a 0600 EnvironmentFile), never in the DB.
-    if let Err(e) = sqlx::query(
-        "INSERT INTO settings (key, value) VALUES ('tunnel_configured', 'true') \
-         ON CONFLICT (key) DO UPDATE SET value = 'true'"
-    )
-    .execute(&state.db)
-    .await
-    {
-        tracing::warn!("failed to persist tunnel_configured flag: {e}");
-    }
-
-    activity::log_activity(
-        &state.db, claims.sub, &claims.email,
-        "tunnel.configured", Some("tunnel"), None, None, None,
-    ).await;
-
-    Ok(Json(result))
-}
-
-/// GET /api/tunnel/status — Get Cloudflare Tunnel status.
-pub async fn tunnel_status(
-    State(_state): State<AppState>,
-    AuthUser(claims): AuthUser,
-    ServerScope(_server_id, agent): ServerScope,
-) -> Result<Json<serde_json::Value>, ApiError> {
-    require_admin(&claims.role)?;
-
-    let result = agent
-        .get("/services/cloudflared/status")
-        .await
-        .map_err(|e| agent_error("Tunnel status", e))?;
-
-    Ok(Json(result))
 }
 
 #[cfg(test)]

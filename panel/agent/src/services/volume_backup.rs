@@ -87,6 +87,15 @@ pub async fn restore_volume(
     container_name: &str,
     filename: &str,
 ) -> Result<(), String> {
+    // Held for the full duration — this does an unconditional rm-rf-then-
+    // extract against a live, potentially-mounted Docker volume, an even
+    // sharper hazard than a config-file race with no rollback if it
+    // interleaves with another operation on the same volume. Keyed
+    // separately from the domain namespace (there's no domain here),
+    // mirroring git_build.rs's `git-deploy:{name}` non-domain key. See
+    // site_lock's module doc.
+    let _guard = crate::site_lock::lock_site(&format!("volume:{volume_name}")).await;
+
     if !is_safe_filename(filename) {
         return Err("Invalid backup filename".into());
     }

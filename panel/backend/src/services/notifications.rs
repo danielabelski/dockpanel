@@ -67,12 +67,21 @@ async fn post_user_webhook(_client: &reqwest::Client, url: &str, payload: serde_
             return;
         }
     };
-    let _ = pinned
+    match pinned
         .post(url)
         .json(&payload)
         .timeout(Duration::from_secs(10))
         .send()
-        .await;
+        .await
+    {
+        Ok(resp) if !resp.status().is_success() => {
+            tracing::warn!("Notification webhook returned {}: {url}", resp.status());
+        }
+        Err(e) => {
+            tracing::warn!("Notification webhook send failed: {e}");
+        }
+        Ok(_) => {}
+    }
 }
 
 // ── Real-time notification broadcast (SSE) ─────────────────────────────────
@@ -213,7 +222,7 @@ pub async fn send_notification(
             } else {
                 "trigger"
             };
-            let _ = client
+            match client
                 .post("https://events.pagerduty.com/v2/enqueue")
                 .json(&serde_json::json!({
                     "routing_key": key,
@@ -227,7 +236,16 @@ pub async fn send_notification(
                 }))
                 .timeout(Duration::from_secs(10))
                 .send()
-                .await;
+                .await
+            {
+                Ok(resp) if !resp.status().is_success() => {
+                    tracing::warn!("PagerDuty alert returned {}", resp.status());
+                }
+                Err(e) => {
+                    tracing::warn!("PagerDuty alert send failed: {e}");
+                }
+                Ok(_) => {}
+            }
         }
     }
 
@@ -406,7 +424,7 @@ pub async fn send_notification_with_runbook(
             if let Some(rurl) = runbook_url {
                 custom_details["runbook_url"] = serde_json::json!(rurl);
             }
-            let _ = client
+            match client
                 .post("https://events.pagerduty.com/v2/enqueue")
                 .json(&serde_json::json!({
                     "routing_key": key,
@@ -420,7 +438,16 @@ pub async fn send_notification_with_runbook(
                 }))
                 .timeout(Duration::from_secs(10))
                 .send()
-                .await;
+                .await
+            {
+                Ok(resp) if !resp.status().is_success() => {
+                    tracing::warn!("PagerDuty alert returned {}", resp.status());
+                }
+                Err(e) => {
+                    tracing::warn!("PagerDuty alert send failed: {e}");
+                }
+                Ok(_) => {}
+            }
         }
     }
 

@@ -165,10 +165,13 @@ Restoring example.com from example.com_2026-03-20_143022.tar.gz...
   Content: files only (this archive holds no database)
 ```
 
-> **The CLI cannot restore databases.** It authenticates to the agent, which has no access to the
-> panel's database records and so cannot be given the site's database credentials. Restoring an
-> archive that carries database dumps therefore **fails** from the CLI rather than restoring the
-> files and reporting success. Use the panel for those.
+> **The CLI can restore databases too — if a panel API key is configured.** `backup restore`
+> prefers a panel-API-authenticated path (`Settings → API Keys`, saved to
+> `/etc/dockpanel/backend.token`) that restores both files and databases through the same route
+> the panel UI's own Restore button uses. Without a configured key, it falls back to the older
+> agent-direct path (files only): the agent has no access to the site's database credentials, so
+> restoring an archive that carries database dumps **fails** rather than restoring the files and
+> reporting success. Mint a key from the panel, or restore from the panel UI, to include databases.
 
 ## Delete a Backup
 

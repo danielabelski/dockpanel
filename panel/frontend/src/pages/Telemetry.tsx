@@ -242,6 +242,7 @@ export default function Telemetry() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
   const [events, setEvents] = useState<TelemetryEvent[]>([]);
+  const [eventsError, setEventsError] = useState(false);
   const [stats, setStats] = useState<TelemetryStats | null>(null);
   const [config, setConfig] = useState<TelemetryConfig>({});
   const [loading, setLoading] = useState(true);
@@ -374,8 +375,10 @@ export default function Telemetry() {
       const data = await api.get<{ events: TelemetryEvent[]; total: number }>(url);
       setEvents(data.events);
       setTotal(data.total);
-    } catch {
-      // empty
+      setEventsError(false);
+    } catch (e: unknown) {
+      setEventsError(true);
+      flash(e instanceof Error ? e.message : "Could not load telemetry events", "error");
     }
   };
 
@@ -875,7 +878,9 @@ export default function Telemetry() {
           {/* Events table */}
           {events.length === 0 ? (
             <div className="bg-dark-800 border border-dark-600 rounded-lg p-8 text-center text-dark-400 text-sm">
-              No telemetry events recorded yet. Events are captured automatically when errors or issues occur.
+              {eventsError
+                ? "Could not load telemetry events — the request failed. Try again."
+                : "No telemetry events recorded yet. Events are captured automatically when errors or issues occur."}
             </div>
           ) : (
             <div className="bg-dark-800 border border-dark-600 rounded-lg overflow-hidden">

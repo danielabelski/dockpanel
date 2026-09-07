@@ -65,14 +65,20 @@ export default function Deploy() {
   const [atomicDeploy, setAtomicDeploy] = useState(false);
   const [keepReleases, setKeepReleases] = useState(5);
 
+  // Settled, not all-or-nothing: these are two independent GETs (deploy config,
+  // deploy logs), and a rejection from either used to fall into one bare catch
+  // that never set `config` — so a genuinely-configured site with a broken
+  // logs fetch looked identical to "never configured". See Databases.tsx's
+  // loadTableDetails for the same fix applied to the same class of bug.
   const load = async () => {
-    try {
-      const [cfg, logData] = await Promise.all([
-        api.get<DeployConfig | null>(`/sites/${id}/deploy`),
-        api.get<DeployLog[]>(`/sites/${id}/deploy/logs?limit=20`),
-      ]);
+    const [cfgResult, logsResult] = await Promise.allSettled([
+      api.get<DeployConfig | null>(`/sites/${id}/deploy`),
+      api.get<DeployLog[]>(`/sites/${id}/deploy/logs?limit=20`),
+    ]);
+
+    if (cfgResult.status === "fulfilled") {
+      const cfg = cfgResult.value;
       setConfig(cfg);
-      setLogs(logData);
       if (cfg) {
         setRepoUrl(cfg.repo_url);
         setBranch(cfg.branch);
@@ -88,11 +94,23 @@ export default function Deploy() {
           } catch { /* no releases yet */ }
         }
       }
-    } catch {
-      // No config yet — that's fine
-    } finally {
-      setLoading(false);
     }
+
+    if (logsResult.status === "fulfilled") {
+      setLogs(logsResult.value);
+    }
+
+    const failed = [
+      cfgResult.status === "rejected" ? "deploy config" : null,
+      logsResult.status === "rejected" ? "deploy logs" : null,
+    ].filter(Boolean) as string[];
+    if (failed.length) {
+      const rejected = (cfgResult.status === "rejected" ? cfgResult : logsResult) as PromiseRejectedResult;
+      const detail = rejected.reason instanceof Error ? rejected.reason.message : "request failed";
+      setMessage({ text: `Could not load ${failed.join(" or ")}: ${detail}`, type: "error" });
+    }
+
+    setLoading(false);
   };
 
   useEffect(() => { load(); }, [id]);

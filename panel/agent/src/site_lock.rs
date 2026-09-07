@@ -20,6 +20,13 @@
 //! one for the same key — `tokio::sync::Mutex` is not reentrant and a nested
 //! same-key acquire deadlocks. `git_build::deploy_or_update` calls
 //! `blue_green_update` internally; only the outer call takes the lock.
+//!
+//! A second loose-ends audit found Docker-app domain exposure/teardown and
+//! volume restore (`routes/docker_apps.rs::expose_domain`/`unexpose_domain`,
+//! `services/docker_apps.rs::blue_green_update`,
+//! `services/volume_backup.rs::restore_volume`) and the single-file restore
+//! route (`routes/backups.rs::restore_file`) had the identical gap — added
+//! here for the same reason as the original nine.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex as StdMutex, OnceLock};

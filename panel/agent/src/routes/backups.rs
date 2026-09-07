@@ -142,6 +142,11 @@ async fn restore_file(
         return Err(err(StatusCode::BAD_REQUEST, "Invalid domain format"));
     }
 
+    // Held through the extraction+chown below, same as `restore` above —
+    // site_lock.rs's own "every operation" invariant was false for this
+    // route until now.
+    let _guard = crate::site_lock::lock_site(&domain).await;
+
     backups::restore_single_file(&domain, &filename, &body.path)
         .await
         .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;

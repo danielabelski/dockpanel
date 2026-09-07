@@ -494,6 +494,8 @@ export default function Apps() {
   const [shellContainer, setShellContainer] = useState<{ id: string; name: string } | null>(null);
   const [shellCmd, setShellCmd] = useState("");
   const [shellOutput, setShellOutput] = useState("");
+  const [shellInfo, setShellInfo] = useState<{ has_bash: boolean; has_sh: boolean } | null>(null);
+  const [shellInfoLoading, setShellInfoLoading] = useState(false);
   const shellOutputRef = useRef<HTMLDivElement>(null);
 
   // Volume browser state
@@ -913,6 +915,17 @@ export default function Apps() {
     setShellContainer({ id: containerId, name });
     setShellCmd("");
     setShellOutput("");
+    setShellInfo(null);
+    setShellInfoLoading(true);
+    try {
+      const info = await api.get<{ has_bash: boolean; has_sh: boolean }>(`/apps/${containerId}/shell-info`);
+      setShellInfo(info);
+    } catch {
+      // Probe failed — fall back to letting the user try anyway.
+      setShellInfo(null);
+    } finally {
+      setShellInfoLoading(false);
+    }
   };
 
   const handleVolumes = async (containerId: string) => {
@@ -2823,11 +2836,17 @@ volumes:
             <div ref={shellOutputRef} className="flex-1 overflow-y-auto p-4 bg-dark-950 font-mono text-xs text-dark-200 whitespace-pre-wrap min-h-[300px]">
               {shellOutput || "Type a command and press Enter.\n"}
             </div>
+            {shellInfo && !shellInfo.has_bash && !shellInfo.has_sh && (
+              <div className="px-4 py-2 border-t border-dark-600 bg-danger-500/10 text-danger-400 text-xs">
+                No shell available in this image — neither bash nor sh could be found.
+              </div>
+            )}
             <div className="px-4 py-3 border-t border-dark-600 flex gap-2 items-center">
               <span className="text-rust-400 font-mono text-sm">$</span>
               <input
                 value={shellCmd}
                 onChange={(e) => setShellCmd(e.target.value)}
+                disabled={!!shellInfo && !shellInfo.has_bash && !shellInfo.has_sh}
                 onKeyDown={async (e) => {
                   if (e.key === "Enter" && shellCmd.trim()) {
                     const cmd = shellCmd;
@@ -2841,9 +2860,9 @@ volumes:
                     }
                   }
                 }}
-                placeholder="Enter command..."
+                placeholder={shellInfoLoading ? "Checking shell availability..." : "Enter command..."}
                 autoFocus
-                className="flex-1 bg-transparent text-dark-100 font-mono text-sm outline-none"
+                className="flex-1 bg-transparent text-dark-100 font-mono text-sm outline-none disabled:opacity-50"
               />
             </div>
           </div>
