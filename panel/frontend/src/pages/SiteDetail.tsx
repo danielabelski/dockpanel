@@ -155,6 +155,12 @@ export default function SiteDetail() {
   // Health Check
   const [health, setHealth] = useState<{ healthy: boolean; status: number; response_time_ms: number } | null>(null);
   const [checkingHealth, setCheckingHealth] = useState(false);
+  const [healthSummary, setHealthSummary] = useState<{
+    ssl_status: { enabled: boolean; days_until_expiry: number | null };
+    backup_freshness: { last_backup: string | null; hours_since: number | null };
+    uptime: { status: string | null; response_time_ms: number | null; monitor_enabled: boolean };
+    score: number;
+  } | null>(null);
 
   // Site Cloning
   const [cloning, setCloning] = useState(false);
@@ -393,6 +399,21 @@ export default function SiteDetail() {
     loadSslProvenance();
   }, [site?.ssl_enabled, site?.domain, loadSslProvenance]);
 
+  // Composite score augmenting the plain up/down Health Check button above —
+  // computed server-side from SSL expiry + backup freshness + monitor uptime,
+  // not a replacement for the on-demand check.
+  useEffect(() => {
+    api
+      .get<{
+        ssl_status: { enabled: boolean; days_until_expiry: number | null };
+        backup_freshness: { last_backup: string | null; hours_since: number | null };
+        uptime: { status: string | null; response_time_ms: number | null; monitor_enabled: boolean };
+        score: number;
+      }>(`/sites/${id}/health-summary`)
+      .then(setHealthSummary)
+      .catch(() => setHealthSummary(null));
+  }, [id]);
+
   useEffect(() => {
     api
       .get<Site>(`/sites/${id}`)
@@ -551,6 +572,24 @@ export default function SiteDetail() {
             {health && (
               <span className={`text-xs font-mono ${health.healthy ? "text-rust-400" : "text-danger-400"}`}>
                 {health.status > 0 ? `${health.status}` : "Down"} · {health.response_time_ms}ms
+              </span>
+            )}
+            {healthSummary && (
+              <span
+                title={[
+                  `SSL: ${healthSummary.ssl_status.enabled ? (healthSummary.ssl_status.days_until_expiry != null ? `expires in ${healthSummary.ssl_status.days_until_expiry}d` : "enabled") : "not enabled"}`,
+                  `Backup: ${healthSummary.backup_freshness.hours_since != null ? `${healthSummary.backup_freshness.hours_since}h ago` : "none on record"}`,
+                  `Uptime: ${healthSummary.uptime.monitor_enabled ? (healthSummary.uptime.status || "unknown") : "not monitored"}`,
+                ].join(" · ")}
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono ${
+                  healthSummary.score >= 80
+                    ? "bg-rust-500/10 text-rust-400"
+                    : healthSummary.score >= 50
+                      ? "bg-warn-500/10 text-warn-400"
+                      : "bg-danger-500/10 text-danger-400"
+                }`}
+              >
+                Health {healthSummary.score}
               </span>
             )}
           </div>

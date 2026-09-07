@@ -178,10 +178,15 @@ pub async fn expected_on_server(pool: &PgPool, server_id: Uuid) -> HashSet<Strin
     .unwrap_or_default()
 }
 
-/// The reason a container is stopped, for the operator-facing surfaces.
-pub async fn reasons_on_server(pool: &PgPool, server_id: Uuid) -> Vec<(String, String)> {
-    sqlx::query_as::<_, (String, String)>(
-        "SELECT container_name, reason FROM container_expected_stops WHERE server_id = $1",
+/// The reason a container is stopped (plus who stopped it, if a person did),
+/// for the operator-facing surfaces. `actor_email` is NULL for auto_sleep,
+/// which no person initiates — see `record()`'s own doc comment.
+pub async fn reasons_on_server(
+    pool: &PgPool,
+    server_id: Uuid,
+) -> Vec<(String, String, Option<String>)> {
+    sqlx::query_as::<_, (String, String, Option<String>)>(
+        "SELECT container_name, reason, actor_email FROM container_expected_stops WHERE server_id = $1",
     )
     .bind(server_id)
     .fetch_all(pool)

@@ -4,6 +4,37 @@ All notable changes to DockPanel will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.232.0]
+
+### Closed the 3 findings the second Loose-Ends Audit (v2.231.0) left as product decisions
+
+All three were presented to Ovidiu as wire-vs-drop calls after v2.231.0 shipped; he picked "wire it
+in" on all three.
+
+**`container_expected_stops.actor_email`** — captured on every manual container stop, never read
+back. `reasons_on_server` now selects it alongside `reason`; the `/apps` annotator adds an
+`expected_stop_by` key when a person (not auto-sleep) stopped the container; the Apps page's
+"stopped on purpose" tooltip now reads `(reason — email)` instead of just `(reason)`.
+
+**`on_call::whoami`** — built with a broader non-admin auth extractor specifically for self-service,
+but the entire on-call UI (`Alerts.tsx`'s `OnCallTab`) is `isAdmin`-gated, so its intended audience
+had zero on-call visibility. Added a header badge on the Dashboard, visible to any authenticated
+user, showing "On call: {schedule name(s)}" when `GET /on-call/whoami` returns a non-empty list.
+Admins get it as a link into Alerts; everyone else gets an informational badge only, since the
+OnCallTab itself stays admin-only and linking a non-admin there would just be a new dead end of the
+exact shape this audit exists to catch.
+
+**`sites::health_summary`** — a real ownership-scoped 0-100 composite score (SSL expiry, backup
+freshness, monitor uptime across 3 tables), distinct from both the boolean `health` check
+`SiteDetail.tsx` already uses and Dashboard's fleet-wide `health_score`. Added a small "Health N"
+badge next to the existing Health Check button, augmenting rather than replacing it, with a tooltip
+breaking down the three sub-scores.
+
+No new routes, migrations, or frontend pages — doc-claims figures unchanged from v2.231.0. Verified:
+backend 474/474 tests + 427 clippy warnings (baseline unchanged), release build clean, frontend
+`tsc -b --noEmit` + `vite build` clean, `docs-claims-pin-e2e.sh` 201/201, full 131-suite
+`tests/*-pin-e2e.sh` sweep green.
+
 ## [2.231.0]
 
 ### Second Loose-Ends Audit — 15 confirmed findings closed in one release

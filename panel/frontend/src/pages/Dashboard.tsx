@@ -294,6 +294,7 @@ export default function Dashboard() {
   const [backupSetup, setBackupSetup] = useState<{ has_schedule: boolean; has_backup: boolean }>({ has_schedule: false, has_backup: false });
   const [sitesList, setSitesList] = useState<SiteDetail[]>([]);
   const [wsConnected, setWsConnected] = useState(false);
+  const [onCallSchedules, setOnCallSchedules] = useState<{ schedule_id: string; schedule_name: string }[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -364,6 +365,13 @@ export default function Dashboard() {
       .get<Intelligence>("/dashboard/intelligence")
       .then(setIntel)
       .catch(() => setError("Failed to load dashboard intelligence"));
+    // Any authenticated user — this is the one on-call surface that isn't
+    // admin-gated, built specifically so a non-admin operator can self-check
+    // without seeing the schedule layout.
+    api
+      .get<{ schedule_id: string; schedule_name: string }[]>("/on-call/whoami")
+      .then(setOnCallSchedules)
+      .catch(() => {});
     // Every handler in `routes/docker_apps.rs` calls `require_admin`, this one
     // included — containers on the box belong to nobody in particular, so there is
     // no tenant view of them to ask for. Same reasoning as the reads below.
@@ -747,6 +755,31 @@ export default function Dashboard() {
             </Link>
           )}
           {intel && isVisible("health_banner") && (
+            <div className="h-4 w-px bg-dark-600 hidden sm:block" />
+          )}
+          {onCallSchedules.length > 0 && (
+            isAdmin ? (
+              <Link
+                to="/alerts"
+                title={`You're on call for: ${onCallSchedules.map(s => s.schedule_name).join(", ")}`}
+                className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium hover:opacity-80 transition-opacity bg-rust-500/10 border-rust-500/20 text-rust-400"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-rust-500" />
+                On call: {onCallSchedules.map(s => s.schedule_name).join(", ")}
+              </Link>
+            ) : (
+              // Non-admins have no page to land on — Alerts.tsx's OnCallTab is
+              // admin-only — so this is informational only, not a link.
+              <span
+                title="You're currently the on-call responder for this schedule"
+                className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium bg-rust-500/10 border-rust-500/20 text-rust-400"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-rust-500" />
+                On call: {onCallSchedules.map(s => s.schedule_name).join(", ")}
+              </span>
+            )
+          )}
+          {onCallSchedules.length > 0 && (
             <div className="h-4 w-px bg-dark-600 hidden sm:block" />
           )}
           <button onClick={() => setShowWidgetConfig(!showWidgetConfig)}

@@ -1092,12 +1092,18 @@ pub async fn list_apps(
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
-                if let Some((_, reason)) = reasons.iter().find(|(n, _)| *n == name) {
+                if let Some((_, reason, actor_email)) = reasons.iter().find(|(n, _, _)| *n == name) {
                     if let Some(obj) = app.as_object_mut() {
                         obj.insert(
                             "expected_stop_reason".to_string(),
                             serde_json::Value::String(reason.clone()),
                         );
+                        if let Some(email) = actor_email {
+                            obj.insert(
+                                "expected_stop_by".to_string(),
+                                serde_json::Value::String(email.clone()),
+                            );
+                        }
                     }
                 }
             }

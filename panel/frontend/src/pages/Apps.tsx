@@ -70,6 +70,7 @@ interface DeployedApp {
   // record of a deliberate stop, which for an exited container means it went
   // down on its own.
   expected_stop_reason?: string;
+  expected_stop_by?: string;
 }
 
 interface StackInfo {
@@ -1570,7 +1571,10 @@ volumes:
               <div key={a.container_id} className="flex items-center justify-between text-xs">
                 <span className="text-dark-100 font-mono">
                   {a.name}{" "}
-                  <span className="text-dark-300">({stopReasonLabel(a.expected_stop_reason)})</span>
+                  <span className="text-dark-300">
+                    ({stopReasonLabel(a.expected_stop_reason)}
+                    {a.expected_stop_by ? ` — ${a.expected_stop_by}` : ""})
+                  </span>
                 </span>
                 <button
                   onClick={() => handleAction(a.container_id, "start")}
