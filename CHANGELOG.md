@@ -4,7 +4,41 @@ All notable changes to DockPanel will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [2.233.0]
+## [2.234.0]
+
+### Git Deploy: Persistent Volumes (GH #118)
+
+A Git Deploy container had no volume and no bind mount, and every deploy replaced the container —
+so anything the app wrote to its own filesystem (uploads, a SQLite database, a cache) was destroyed
+on the *next* deploy. Reported as a real data-loss incident. Tracked as unbuilt work since it was
+priced (six named constraints recorded beside the code that would change), rather than declined —
+this ship builds it.
+
+**What shipped.** A `Persistent Volumes` field on the Git Deploy form — container paths only
+(`/data`, not a host path); DockPanel derives and manages the host location under its own data
+directory, mirroring how Docker Apps already bind declared volumes. Takes effect on the next
+deploy.
+
+**All six constraints closed together, since 1-5 alone would have been a regression:**
+- The two `HostConfig` literals (base deploy + blue-green) no longer disagree — blue-green is now
+  refused whenever a deploy declares any volume, falling back to the ordinary stop/start path
+  instead of running two containers against the same host paths for the length of a health check
+  (silent corruption for a single-writer database like SQLite).
+- Preview environments are refused a `volumes` list at the agent's own request boundary, not merely
+  by the panel choosing not to send one — a throwaway PR container must never gain durable storage.
+- Delete-time cleanup derives what to remove from the container's own binds, read in the same
+  pre-removal inspect used for its vhost and certificates — never from its name alone, which is not
+  proof of ownership.
+- Adding a path to an already-running deploy rescues whatever is already sitting in that
+  container's writable layer before the recreate would otherwise delete it (generalized
+  `docker_apps::migrate_unmounted_volumes`, the same mechanism that closed GH #110).
+
+Live-verified end to end against a real Docker daemon: seed-from-image on a fresh deploy, data
+surviving an ordinary redeploy, real writable-layer data surviving the deploy that adds a volume to
+it, the volume directory removed on full deletion (and left alone when the container could not be
+proven owned), and both the preview and path-traversal refusals firing with zero side effects.
+
+
 
 ### Two buried capabilities surfaced (Mode B research quick wins)
 

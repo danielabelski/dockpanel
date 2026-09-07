@@ -67,6 +67,10 @@ interface GitDeploy {
   deploy_protected: boolean;
   build_method: string;
   preview_ttl_hours: number;
+  // Container paths bind-mounted durably under GIT_DATA_DIR/{name} on the agent
+  // (#118) — the host side is never operator-supplied. Always empty for
+  // anything the panel deploys as a preview.
+  volumes: string[];
 }
 
 interface GitPreview {
@@ -170,6 +174,7 @@ export default function GitDeploys() {
   const [formCron, setFormCron] = useState("");
   const [formProtected, setFormProtected] = useState(false);
   const [formPreviewTtl, setFormPreviewTtl] = useState(24);
+  const [formVolumes, setFormVolumes] = useState<string[]>([]);
 
   const loadDeploys = async () => {
     try {
@@ -237,6 +242,7 @@ export default function GitDeploys() {
     setFormGithubToken("");
     setFormCron("");
     setFormProtected(false);
+    setFormVolumes([]);
   };
 
   const openCreate = () => {
@@ -270,6 +276,7 @@ export default function GitDeploys() {
     setFormCron(selected.deploy_cron || "");
     setFormProtected(selected.deploy_protected || false);
     setFormPreviewTtl(selected.preview_ttl_hours ?? 24);
+    setFormVolumes(selected.volumes || []);
     setEditing(true);
     setShowModal(true);
   };
@@ -319,6 +326,12 @@ export default function GitDeploys() {
       deploy_cron: formCron.trim(),
       deploy_protected: formProtected,
       preview_ttl_hours: formPreviewTtl,
+      // Takes effect on the NEXT deploy, not this save — the field only
+      // changes what a future container's HostConfig binds, and this request
+      // never talks to the agent. Sent in full every time, empty included, so
+      // clearing every row here removes the last volume on the next deploy
+      // rather than leaving a stale one behind.
+      volumes: formVolumes.map((v) => v.trim()).filter(Boolean),
     };
     try {
       if (editing && selected) {
@@ -804,6 +817,16 @@ export default function GitDeploys() {
                         <span className="text-dark-300">=</span>
                         <span className="text-dark-200">{"*".repeat(Math.min(v.length, 12))}</span>
                       </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {(selected.volumes || []).length > 0 && (
+                <div className="mt-4">
+                  <span className="block text-xs font-medium text-dark-300 mb-1">Persistent Volumes</span>
+                  <div className="bg-dark-900 border border-dark-500 rounded-lg p-3 space-y-1">
+                    {selected.volumes.map((path) => (
+                      <div key={path} className="text-xs font-mono text-dark-100">{path}</div>
                     ))}
                   </div>
                 </div>
@@ -1342,6 +1365,56 @@ export default function GitDeploys() {
                     </div>
                   </>
                 )}
+              </div>
+
+              {/* Persistent Volumes */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-sm font-medium text-dark-100">Persistent Volumes</label>
+                  <button
+                    type="button"
+                    onClick={() => setFormVolumes([...formVolumes, ""])}
+                    className="px-2 py-0.5 text-xs text-rust-400 hover:text-rust-300 font-medium transition-colors"
+                  >
+                    + Add
+                  </button>
+                </div>
+                <p className="text-xs text-dark-300 mb-2">
+                  Container paths only — DockPanel manages the host location for you. Without one,
+                  every deploy replaces the container and anything it wrote to its own filesystem is
+                  lost. Takes effect on the next deploy; adding a path here carries over whatever the
+                  running container already has there.
+                </p>
+                {formVolumes.length === 0 && (
+                  <p className="text-xs text-dark-300">No persistent volumes defined</p>
+                )}
+                <div className="space-y-2">
+                  {formVolumes.map((path, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={path}
+                        onChange={(e) => {
+                          const next = [...formVolumes];
+                          next[i] = e.target.value;
+                          setFormVolumes(next);
+                        }}
+                        placeholder="/data"
+                        className="flex-1 px-3 py-2 border border-dark-500 rounded-lg text-sm font-mono focus:ring-2 focus:ring-accent-500 outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setFormVolumes(formVolumes.filter((_, j) => j !== i))}
+                        className="p-1.5 text-danger-400 hover:text-danger-300 transition-colors"
+                        title="Remove volume"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
 
               {/* Auto-deploy toggle */}

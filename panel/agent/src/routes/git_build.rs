@@ -75,6 +75,48 @@ fn is_valid_build_context(ctx: &str) -> bool {
     !ctx.contains("..") && !ctx.starts_with('/')
 }
 
+/// A persistent-volume field is CONTAINER-path only (#118) — the host side is
+/// always derived under `GIT_DATA_DIR/{name}` and never taken from the request,
+/// so the only injection surface left is the container path feeding that
+/// derivation. `..` is rejected here, before it ever reaches
+/// `std::fs::create_dir_all`: that call walks `..` components using the OS's own
+/// path resolution and can create a directory OUTSIDE the intended prefix before
+/// the later `canonicalize` + prefix check ever runs, exactly the way a symlink
+/// escape would. Otherwise deliberately loose — this only stops the dangerous
+/// set, matching `is_valid_dockerfile`/`is_valid_build_context` above.
+fn is_valid_volume_path(path: &str) -> bool {
+    path.starts_with('/')
+        && path.len() > 1
+        && path.len() <= 200
+        && !path.contains("..")
+        && !path.contains("//")
+        && path
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '_' | '-' | '.'))
+}
+
+/// At most this many declared volumes per deploy — a sane bound on an
+/// operator-editable list, not a resource limit the deploy itself needs.
+const MAX_VOLUMES: usize = 10;
+
+fn validate_volumes(volumes: &[String]) -> Result<(), &'static str> {
+    if volumes.len() > MAX_VOLUMES {
+        return Err("too many volumes declared (max 10)");
+    }
+    if !volumes.iter().all(|v| is_valid_volume_path(v)) {
+        return Err(
+            "invalid volume path: must be an absolute container path with no '..' or '//'",
+        );
+    }
+    let mut sorted = volumes.to_vec();
+    sorted.sort();
+    sorted.dedup();
+    if sorted.len() != volumes.len() {
+        return Err("duplicate volume path");
+    }
+    Ok(())
+}
+
 /// Validate that an image_tag is a dockpanel-managed tag and has no path traversal.
 fn is_valid_image_tag(tag: &str) -> bool {
     tag.starts_with("dockpanel-git-") && !tag.contains('/')
@@ -160,6 +202,11 @@ struct DeployRequest {
     tls_certificate: Option<String>,
     #[serde(default)]
     scope: String,
+    /// Container paths to bind-mount durably under `GIT_DATA_DIR/{name}` (#118).
+    /// Absent from a panel that predates the field, exactly like every other
+    /// `#[serde(default)]` here — an old panel simply never declares volumes.
+    #[serde(default)]
+    volumes: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -307,8 +354,26 @@ async fn deploy_container(
             return Err(err(StatusCode::BAD_REQUEST, "Invalid domain"));
         }
     }
+    if let Err(msg) = validate_volumes(&body.volumes) {
+        return Err(err(StatusCode::BAD_REQUEST, msg));
+    }
 
     let scope = scope_of(&body.scope);
+
+    // Previews must never gain durable local storage (#118): a throwaway PR
+    // container writing into its own persistent directory defeats the point of
+    // it being throwaway, and TTL teardown would then be destroying real data
+    // rather than a re-clonable checkout. The panel is not trusted to enforce
+    // this on its own — it is the boundary a request actually crosses, and a
+    // future bug there must not be the only thing standing between a preview
+    // and durable storage.
+    if scope != ownership::GitScope::Deploy && !body.volumes.is_empty() {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "volumes are not supported for preview deployments",
+        ));
+    }
+
     let name = scope.scoped(&body.name);
 
     // Decide the TLS shape BEFORE anything runs — mirrors
@@ -343,6 +408,7 @@ async fn deploy_container(
         body.memory_mb,
         body.cpu_percent,
         tls,
+        &body.volumes,
     )
     .await
     .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
@@ -719,7 +785,43 @@ pub fn router() -> Router<AppState> {
 
 #[cfg(test)]
 mod tests {
-    use super::is_safe_nginx_domain;
+    use super::{is_safe_nginx_domain, is_valid_volume_path, validate_volumes};
+
+    #[test]
+    fn volume_path_rejects_traversal_and_free_form_hosts() {
+        // `..` must be rejected before `create_dir_all` ever sees it — that call
+        // walks path components using the OS's own resolution and can create a
+        // directory outside GIT_DATA_DIR before canonicalize's prefix check runs.
+        for p in [
+            "../etc/passwd",
+            "/data/../../etc",
+            "data",     // not absolute
+            "/",        // the root itself
+            "",
+            "//data",   // empty segment
+            "/data;rm", // outside the allowed charset
+        ] {
+            assert!(!is_valid_volume_path(p), "{p:?} must be rejected");
+        }
+        let too_long = format!("/{}", "a".repeat(200));
+        assert!(!is_valid_volume_path(&too_long), "a 200+ char path must be rejected");
+    }
+
+    #[test]
+    fn volume_path_allows_ordinary_container_paths() {
+        for p in ["/data", "/app/uploads", "/var/lib/app-data", "/a"] {
+            assert!(is_valid_volume_path(p), "{p:?} must be allowed");
+        }
+    }
+
+    #[test]
+    fn validate_volumes_rejects_duplicates_and_the_over_limit_case() {
+        assert!(validate_volumes(&["/data".to_string(), "/data".to_string()]).is_err());
+        let too_many: Vec<String> = (0..11).map(|i| format!("/d{i}")).collect();
+        assert!(validate_volumes(&too_many).is_err());
+        assert!(validate_volumes(&["/data".to_string(), "/uploads".to_string()]).is_ok());
+        assert!(validate_volumes(&[]).is_ok());
+    }
 
     #[test]
     fn safe_nginx_domain_blocks_injection_and_traversal() {

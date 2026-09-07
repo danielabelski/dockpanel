@@ -47,7 +47,7 @@ const GIT_DEPLOY_SELECT: &str = "SELECT d.id, d.user_id, d.server_id, d.name, d.
     d.pre_build_cmd, d.post_deploy_cmd, d.build_args, d.build_context, d.last_deploy, \
     d.last_commit, d.created_at, d.updated_at, d.github_token, d.deploy_cron, \
     d.deploy_protected, d.build_method, d.preview_ttl_hours, d.scheduled_deploy_at, \
-    d.tls_mode, d.tls_certificate_id, c.alias AS tls_certificate \
+    d.tls_mode, d.tls_certificate_id, d.volumes, c.alias AS tls_certificate \
     FROM git_deploys d LEFT JOIN tls_certificates c ON c.id = d.tls_certificate_id";
 
 /// git_previews.container_name is stored WITH the `dockpanel-git-` prefix that
@@ -210,6 +210,10 @@ pub struct GitDeploy {
     pub tls_mode: Option<String>,
     /// The registered certificate a provided-mode deploy serves.
     pub tls_certificate_id: Option<Uuid>,
+    /// Container paths to bind-mount durably under `GIT_DATA_DIR/{name}` on the
+    /// agent (#118) — a JSON array of strings, e.g. `["/data", "/app/uploads"]`.
+    /// Never sent to a preview deploy; see `handle_preview_deploy`.
+    pub volumes: serde_json::Value,
     /// That certificate's alias, joined in by `GIT_DEPLOY_SELECT`. Defaulted
     /// so `create`/`update`'s plain `RETURNING *` (no join in a RETURNING
     /// clause) still maps onto this struct; both handlers set it by hand
@@ -259,6 +263,11 @@ pub(crate) struct DeployBody<'a> {
     /// or `"preview"`. Not defaulted on purpose: an omitted scope is precisely
     /// how a preview came to be able to name a deployment's container.
     pub scope: &'a str,
+    /// Container paths to bind-mount durably (#118). ALWAYS empty for a preview
+    /// — see `handle_preview_deploy`'s own comment on why memory_mb/cpu_percent
+    /// are withheld there too, and the agent's `deploy_container` route refuses
+    /// a non-empty list for any scope but `"deploy"` as the actual boundary.
+    pub volumes: &'a [String],
 }
 
 /// The address the agent is handed for THIS deploy. Only an ACME order needs
@@ -329,6 +338,52 @@ fn env_object(env_vars: &serde_json::Value) -> serde_json::Value {
     serde_json::Value::Object(coerced)
 }
 
+/// A persistent-volume path is CONTAINER-path only (#118) — the host side is
+/// always derived by the agent under `GIT_DATA_DIR/{name}`, never taken from
+/// the request. Mirrors the agent's OWN `is_valid_volume_path` exactly:
+/// duplicated rather than shared (different crates, different binaries that
+/// update on their own schedule) the same way `is_valid_name`/domain validity
+/// already are between panel and agent. This is the friendly-case check; the
+/// agent's copy is the actual security floor.
+fn is_valid_volume_path(path: &str) -> bool {
+    path.starts_with('/')
+        && path.len() > 1
+        && path.len() <= 200
+        && !path.contains("..")
+        && !path.contains("//")
+        && path
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '_' | '-' | '.'))
+}
+
+const MAX_VOLUMES: usize = 10;
+
+fn validate_volumes(volumes: &[String]) -> Result<(), &'static str> {
+    if volumes.len() > MAX_VOLUMES {
+        return Err("Too many volumes declared (max 10)");
+    }
+    if !volumes.iter().all(|v| is_valid_volume_path(v)) {
+        return Err("Invalid volume path: must be an absolute container path with no '..' or '//'");
+    }
+    let mut sorted = volumes.to_vec();
+    sorted.sort();
+    sorted.dedup();
+    if sorted.len() != volumes.len() {
+        return Err("Duplicate volume path");
+    }
+    Ok(())
+}
+
+/// Coerce the `volumes` JSONB into the `Vec<String>` the agent deserializes,
+/// mirroring `env_object`'s defensive extraction — an unconstrained JSONB
+/// column can hold anything a hand-written row or a future writer puts there,
+/// and a non-string entry should be dropped, not fail the whole deploy.
+fn volumes_vec(v: &serde_json::Value) -> Vec<String> {
+    v.as_array()
+        .map(|arr| arr.iter().filter_map(|e| e.as_str().map(str::to_string)).collect())
+        .unwrap_or_default()
+}
+
 pub(crate) fn build_deploy_body(b: DeployBody<'_>) -> serde_json::Value {
     let mut body = serde_json::json!({
         "name": b.name,
@@ -338,6 +393,9 @@ pub(crate) fn build_deploy_body(b: DeployBody<'_>) -> serde_json::Value {
         "env": env_object(b.env_vars),
         "scope": b.scope,
     });
+    if !b.volumes.is_empty() {
+        body["volumes"] = serde_json::json!(b.volumes);
+    }
     // An emptied text column arrives here as Some("") rather than None, because
     // clearing a field is expressed as the empty string on the wire (the shape
     // v2.120.0 settled on for the alert destinations). Blank is absent for both
@@ -405,6 +463,7 @@ pub struct CreateRequest {
     pub deploy_cron: Option<String>,
     pub deploy_protected: Option<bool>,
     pub preview_ttl_hours: Option<i32>,
+    pub volumes: Option<Vec<String>>,
 }
 
 #[derive(serde::Deserialize)]
@@ -432,6 +491,11 @@ pub struct UpdateRequest {
     pub deploy_cron: Option<String>,
     pub deploy_protected: Option<bool>,
     pub preview_ttl_hours: Option<i32>,
+    /// Absent means keep the stored list. The frontend always sends the full
+    /// current list (including `[]` to clear it), so in practice this is only
+    /// ever `None` for a caller that omits the key entirely — matching how
+    /// `env_vars`/`build_args` already behave on this handler.
+    pub volumes: Option<Vec<String>>,
 }
 
 /// GET /api/git-deploys — List all git deploys for the current user.
@@ -562,6 +626,12 @@ pub async fn create(
         }
     }
 
+    let volumes = body.volumes.clone().unwrap_or_default();
+    if let Err(msg) = validate_volumes(&volumes) {
+        return Err(err(StatusCode::BAD_REQUEST, msg));
+    }
+    let volumes_json = serde_json::to_value(&volumes).unwrap_or(serde_json::json!([]));
+
     // Format, reserved and every owner — see services::domain_claim. The two
     // conflict queries that used to be inlined here are the ones `update` never
     // grew, which is how a git deploy could be RENAMED onto an occupied domain
@@ -645,8 +715,8 @@ pub async fn create(
         };
 
     let mut deploy: GitDeploy = sqlx::query_as(
-        "INSERT INTO git_deploys (user_id, server_id, name, repo_url, branch, dockerfile, container_port, host_port, domain, env_vars, auto_deploy, webhook_secret, memory_mb, cpu_percent, ssl_email, pre_build_cmd, post_deploy_cmd, build_args, build_context, github_token, deploy_cron, deploy_protected, preview_ttl_hours, tls_mode, tls_certificate_id) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25) \
+        "INSERT INTO git_deploys (user_id, server_id, name, repo_url, branch, dockerfile, container_port, host_port, domain, env_vars, auto_deploy, webhook_secret, memory_mb, cpu_percent, ssl_email, pre_build_cmd, post_deploy_cmd, build_args, build_context, github_token, deploy_cron, deploy_protected, preview_ttl_hours, tls_mode, tls_certificate_id, volumes) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26) \
          RETURNING *",
     )
     .bind(claims.sub)
@@ -679,6 +749,7 @@ pub async fn create(
     .bind(preview_ttl)
     .bind(mode)
     .bind(tls_certificate_id)
+    .bind(&volumes_json)
     .fetch_one(&state.db)
     .await
     .map_err(|e| {
@@ -887,6 +958,12 @@ pub async fn update(
 
     let env_vars = body.env_vars.as_ref().map(|e| serde_json::to_value(e).unwrap_or_default());
     let build_args = body.build_args.as_ref().map(|e| serde_json::to_value(e).unwrap_or_default());
+    if let Some(ref vols) = body.volumes
+        && let Err(msg) = validate_volumes(vols)
+    {
+        return Err(err(StatusCode::BAD_REQUEST, msg));
+    }
+    let volumes = body.volumes.as_ref().map(|v| serde_json::to_value(v).unwrap_or_default());
 
     let github_token_enc =
         encrypt_stored_token(body.github_token.as_deref(), &state.config.jwt_secret)?;
@@ -1000,8 +1077,9 @@ pub async fn update(
          preview_ttl_hours = COALESCE($18, preview_ttl_hours), \
          tls_mode = $19, \
          tls_certificate_id = $20, \
+         volumes = COALESCE($21, volumes), \
          updated_at = NOW() \
-         WHERE id = $21 AND user_id = $22 \
+         WHERE id = $22 AND user_id = $23 \
          RETURNING *",
     )
     .bind(body.repo_url.as_deref())
@@ -1024,6 +1102,7 @@ pub async fn update(
     .bind(body.preview_ttl_hours)
     .bind(mode)
     .bind(tls_certificate_id)
+    .bind(volumes)
     .bind(id)
     .bind(claims.sub)
     .fetch_one(&state.db)
@@ -1647,6 +1726,7 @@ pub async fn rollback(
             tls_mode: Some(effective_mode),
             tls_certificate: config.tls_certificate.as_deref(),
             scope: "deploy",
+            volumes: &volumes_vec(&config.volumes),
         });
 
         match agent.post_long("/git/deploy", Some(deploy_body), 120).await {
@@ -2676,6 +2756,7 @@ fn spawn_deploy_task(
             tls_mode: Some(effective_mode),
             tls_certificate: config.tls_certificate.as_deref(),
             scope: "deploy",
+            volumes: &volumes_vec(&config.volumes),
         });
 
         match agent.post_long("/git/deploy", Some(deploy_body), 120).await {
@@ -2879,6 +2960,7 @@ fn spawn_deploy_task(
                     // `&'static str`, so a plain copy — no clone needed.
                     let monitor_effective_mode = effective_mode;
                     let monitor_config_tls_certificate = config.tls_certificate.clone();
+                    let monitor_config_volumes = volumes_vec(&config.volumes);
 
                     tokio::spawn(async move {
                         // Check container health every 15s for 2 minutes
@@ -2922,6 +3004,7 @@ fn spawn_deploy_task(
                                             tls_mode: Some(monitor_effective_mode),
                                             tls_certificate: monitor_config_tls_certificate.as_deref(),
                                             scope: "deploy",
+                                            volumes: &monitor_config_volumes,
                                         });
 
                                         if monitor_agent.post_long("/git/deploy", Some(rollback_body), 120).await.is_ok() {
@@ -3693,6 +3776,7 @@ pub async fn trigger_deploy_task(
         tls_mode: Some(effective_mode),
         tls_certificate: config.tls_certificate.as_deref(),
         scope: "deploy",
+        volumes: &volumes_vec(&config.volumes),
     });
 
     match agent.post_long("/git/deploy", Some(deploy_body), 120).await {
@@ -4071,6 +4155,15 @@ async fn handle_preview_deploy(
         // parent app: preview containers have always run unbounded, and quietly
         // starting to cap them would be a behaviour change this fix did not set out
         // to make. Recorded rather than silently kept — see the s288 ledger.
+        //
+        // volumes is likewise ALWAYS empty here, and for a sharper reason than
+        // "unreviewed behaviour change": a throwaway PR container must never gain
+        // durable local storage (#118) — TTL teardown would then be destroying
+        // real data rather than a re-clonable checkout, and the point of a
+        // preview is that it IS throwaway. The agent's `deploy_container` route
+        // refuses a non-empty list for any scope but `"deploy"` as the actual
+        // boundary; this is not the only thing standing between a preview and
+        // persistent storage, but it should never even try.
         let deploy_body = build_deploy_body(DeployBody {
             name: &format!("{name}-pr-{branch_slug}"),
             image_tag: &image_tag,
@@ -4085,6 +4178,7 @@ async fn handle_preview_deploy(
             tls_mode: Some(effective_mode),
             tls_certificate: tls_certificate.as_deref(),
             scope: "preview",
+            volumes: &[],
         });
 
         // Same refusal `spawn_deploy_task`/`trigger_deploy_task` apply: an
@@ -4691,6 +4785,7 @@ mod tests {
             tls_mode: None,
             tls_certificate: None,
             scope: "deploy",
+            volumes: &[],
         })
     }
 
@@ -4709,9 +4804,32 @@ mod tests {
     #[test]
     fn optional_fields_are_omitted_not_nulled() {
         let body = body_with(serde_json::json!({}));
-        for k in ["domain", "memory_mb", "cpu_percent", "ssl_email", "tls_mode", "tls_certificate"] {
+        for k in ["domain", "memory_mb", "cpu_percent", "ssl_email", "tls_mode", "tls_certificate", "volumes"] {
             assert!(body.get(k).is_none(), "{k} should be absent, not null");
         }
+    }
+
+    #[test]
+    fn declared_volumes_are_sent() {
+        // Positive control for the mutation this guards against: a `DeployBody`
+        // with a non-empty `volumes` that never reaches the wire would deploy
+        // every declared path silently unmounted (#118's exact original defect).
+        let body = build_deploy_body(DeployBody {
+            name: "app",
+            image_tag: "dockpanel-git-app:abc",
+            container_port: 3000,
+            host_port: 30001,
+            env_vars: &serde_json::json!({}),
+            domain: None,
+            memory_mb: None,
+            cpu_percent: None,
+            ssl_email: None,
+            tls_mode: None,
+            tls_certificate: None,
+            scope: "deploy",
+            volumes: &["/data".to_string(), "/app/uploads".to_string()],
+        });
+        assert_eq!(body["volumes"], serde_json::json!(["/data", "/app/uploads"]));
     }
 
     #[test]
@@ -4735,6 +4853,7 @@ mod tests {
             tls_mode: Some("provided"),
             tls_certificate: Some("wildcard-2026"),
             scope: "deploy",
+            volumes: &[],
         });
         assert_eq!(body["tls_mode"], "provided");
         assert_eq!(body["tls_certificate"], "wildcard-2026");
@@ -4756,6 +4875,7 @@ mod tests {
             tls_mode: Some("acme"),
             tls_certificate: None,
             scope: "deploy",
+            volumes: &[],
         });
         assert_eq!(body["tls_mode"], "acme");
         assert_eq!(body["ssl_email"], "ops@example.com");

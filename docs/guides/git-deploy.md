@@ -48,12 +48,11 @@ An agent older than v2.160.0 does not understand a registered certificate at
 all; provided mode is refused up front on a server running one, rather than
 silently falling back to plain HTTP or Let's Encrypt.
 
-> **Before you build: a Git Deploy container has no persistent storage.** Every
-> deploy replaces the container, so anything the app writes to its own
-> filesystem is lost — and the loss lands on the *second* deploy, not the first.
-> Read [Git Deploys have no persistent storage](#git-deploys-have-no-persistent-storage)
-> before you design where your data lives. It is far cheaper to point the app at
-> a database or object storage now than to move it after the first loss.
+> **Before you build: a Git Deploy container has no persistent storage unless you
+> declare one.** Every deploy replaces the container, so anything the app
+> writes to its own filesystem is lost on the next deploy — unless you add a
+> **Persistent Volume** for that path. Read [Persistent Volumes](#persistent-volumes)
+> before you design where your data lives.
 
 ### Changing the domain later
 
@@ -164,31 +163,73 @@ The **GitHub Token** on the deploy form is **not** a clone credential. It is use
 only to post commit statuses back to GitHub after a deploy, so a commit shows a
 green tick. Leaving it empty changes nothing about cloning.
 
-## Git Deploys have no persistent storage
+## Persistent Volumes
 
-**A Git Deploy container has no volumes and no bind mounts, and every deploy
-replaces the container. Anything the application writes to its own filesystem —
-uploaded files, generated documents, a SQLite database, a cache — is gone on the
-next deploy.**
+**By default a Git Deploy container has no volumes and no bind mounts, and
+every deploy replaces the container.** Anything the application writes to its
+own filesystem — uploaded files, generated documents, a SQLite database, a
+cache — is gone on the next deploy unless the path is declared as a
+**Persistent Volume** in the deploy's settings.
 
-Nothing warns you at the time. The first deploy works, the app writes files, and
-the loss happens on the *second* deploy, which is usually much later and looks
-unrelated. Design around it from the start:
+Nothing used to warn you at the time: the first deploy worked, the app wrote
+files, and the loss happened on the *second* deploy, which usually looked
+unrelated. If your app writes to its own filesystem, add the path (e.g.
+`/data` or `/app/uploads`) under **Persistent Volumes** on the deploy form
+before you rely on it surviving a redeploy.
+
+### How it works
+
+- **Container paths only.** You declare where the app writes *inside the
+  container* — `/data`, not a host path. DockPanel manages the host location
+  for you, under its own data directory, one subdirectory per deploy per
+  declared path. There is no field for the host side, and there does not need
+  to be one.
+- **Takes effect on the next deploy.** Adding or editing the list saves
+  immediately, but nothing about the running container changes until you
+  deploy again.
+- **Adding a path to an already-running deploy carries its existing data
+  forward.** If the app already wrote real files at that path — in the
+  container's own writable layer, because it was never mounted — the next
+  deploy copies them out onto the new persistent location before the old
+  container is removed. You do not lose what was already there.
+- **Blue-green is not used for a deploy with any persistent volume.**
+  Zero-downtime swaps briefly run the old and new container side by side, and
+  two containers writing the same files at once is exactly the kind of
+  silent corruption a single-writer database (SQLite, for example) cannot
+  survive. A deploy with a volume gets the ordinary stop-then-start path
+  instead — a brief gap in traffic, never two writers.
+- **Removing a path from the list stops mounting it on the next deploy, but
+  does not delete the data.** It stays on disk, orphaned, in case you added it
+  back or need to recover it by hand.
+- **Deleting the deploy entirely removes its volume data too**, the same way
+  deleting a Docker App removes its data directory.
+
+### What still does not get one
+
+- **Preview environments never get persistent volumes**, even if the parent
+  deploy has them. A preview is throwaway by design — its TTL cleanup would
+  otherwise be destroying real data instead of a re-clonable checkout.
+- **A Compose-based deploy** (see the warning below) does not go through this
+  field at all; volumes there come from the compose file itself.
+
+### Alternatives worth knowing about
+
+A declared volume is local disk on one server. For anything that needs to
+survive moving the app to another machine, or that several instances need to
+share, these remain the better fit:
 
 - **A database** — create one under **Databases** and connect to it with an
-  environment variable. This is the right home for anything relational.
+  environment variable.
 - **Object storage** — S3, MinIO or similar for user uploads and generated
-  files. This also survives moving the app to another server.
-- **Deploy it as a Docker App instead** — Docker Apps *do* bind declared volumes.
-  You give up the webhook, preview-environment and rollback features that make
-  Git Deploy worth using, so this is a trade rather than a workaround.
+  files.
 
 Two things that look like solutions and are not:
 
-- **`VOLUME` in the Dockerfile** gives each new container a fresh anonymous
-  volume, so nothing carries over.
-- **Mounting something by hand with `docker run`** is undone by the next deploy,
-  which recreates the container without it — it works until it doesn't.
+- **`VOLUME` in the Dockerfile alone**, with nothing declared in the deploy's
+  settings, still gives each new container a fresh anonymous volume — nothing
+  carries over.
+- **Mounting something by hand with `docker run`** is undone by the next
+  deploy, which recreates the container through the panel.
 
 > **Do not add a `docker-compose.yml` to an existing Git Deploy to get volumes.**
 > The presence of a compose file switches the deploy onto a different code path
@@ -197,7 +238,9 @@ Two things that look like solutions and are not:
 > domain goes on serving the previous build while the new stack runs beside it
 > on its own port. Blue-green deploys and preview environments are unavailable
 > while a compose file is present, and a rollback entry recorded under Compose
-> has no image to roll back to.
+> has no image to roll back to. Use the Persistent Volumes field above instead —
+> it is built for exactly this and keeps the domain, certificate, zero-downtime
+> swaps, previews and rollback all working.
 
 Two parts of that warning were closed in v2.148.0, and the rest of it stands:
 
@@ -215,15 +258,6 @@ Two parts of that warning were closed in v2.148.0, and the rest of it stands:
   removes nothing, so a *second* compose deploy of the same deployment collides
   with its own container names and every service fails — and that was reported
   as a successful deploy of the new commit.
-
-Volumes on Git Deploys are tracked as unbuilt work rather than declined. The
-six constraints that make it bigger than a field — two `HostConfig` literals,
-the blue-green refusal it needs, previews that must not inherit volumes,
-delete-time cleanup that has to read the binds before removal, a
-container-path-only field shape, and carrying the data already in the
-container's writable layer onto the mount on the deploy that adds it — are
-recorded in the agent beside the code that would change
-(`panel/agent/src/services/git_build.rs`).
 
 ## Nixpacks Auto-Detection
 

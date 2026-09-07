@@ -3039,7 +3039,7 @@ pub fn list_templates() -> Vec<AppTemplate> {
 /// Measured over the catalogue by reading every image's config: 42 of 148 images
 /// run non-root, and 31 of those declare a volume.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct VolumeOwner {
+pub(crate) struct VolumeOwner {
     uid: u32,
     /// `None` when no group could be resolved. The directory then keeps the group
     /// it already has, which is enough — the owner can write either way.
@@ -3252,7 +3252,7 @@ fn tar_extract_into(archive: &[u8], dest: &std::path::Path) -> std::io::Result<V
 ///     uses before it moves anything;
 ///   * a failure is logged and swallowed. Before this existed the directory was
 ///     empty, which is exactly where a failure leaves it, so nothing regresses.
-async fn seed_volume_from_image(
+pub(crate) async fn seed_volume_from_image(
     docker: &Docker,
     image: &str,
     container_path: &str,
@@ -3448,7 +3448,7 @@ fn group_lookup(group: &str, name: &str) -> Option<u32> {
 /// directory on a host that runs other people's containers. When the spec cannot
 /// be resolved this returns `None` and says so out loud, leaving the directory
 /// root-owned — the same state as before, but no longer a silent one.
-async fn resolve_volume_owner(docker: &Docker, image: &str) -> Option<VolumeOwner> {
+pub(crate) async fn resolve_volume_owner(docker: &Docker, image: &str) -> Option<VolumeOwner> {
     let spec = docker
         .inspect_image(image)
         .await
@@ -3513,7 +3513,7 @@ async fn resolve_volume_owner(docker: &Docker, image: &str) -> Option<VolumeOwne
 /// image create its own files underneath; recursing would rewrite ownership of
 /// data a previous deployment wrote, which is a bigger and riskier operation than
 /// the defect calls for.
-fn chown_to(path: &str, owner: &VolumeOwner) -> std::io::Result<()> {
+pub(crate) fn chown_to(path: &str, owner: &VolumeOwner) -> std::io::Result<()> {
     let c_path = std::ffi::CString::new(path)
         .map_err(|_| std::io::Error::other("volume path contains a NUL byte"))?;
     // `-1` means "leave this one as it is" — the same call shape `main.rs` uses to
@@ -4529,7 +4529,7 @@ pub(crate) async fn inspect_host_port(container_id: &str) -> Option<u16> {
 /// A container may express a mount as a `Binds` entry (`"src:dst[:opts]"`) or as a
 /// `Mounts` entry carrying a `target`, and Docker accepts either. A census keyed on one
 /// of them is blind to the other, so this reads both and returns the union.
-fn mounted_destinations(host_config: &bollard::service::HostConfig) -> Vec<String> {
+pub(crate) fn mounted_destinations(host_config: &bollard::service::HostConfig) -> Vec<String> {
     let mut dests = Vec::new();
     if let Some(binds) = &host_config.binds {
         for bind in binds {
@@ -4657,12 +4657,13 @@ fn app_data_name(labels: Option<&HashMap<String, String>>, container_name: &str)
 /// - **Any failure is returned, and every caller must abort the recreate before removing
 ///   the container.** A migration that half-worked followed by a `docker rm` would destroy
 ///   the very data it was called to save.
-async fn migrate_unmounted_volumes(
+pub(crate) async fn migrate_unmounted_volumes(
+    data_dir: &str,
     docker: &Docker,
     container_id: &str,
     name: &str,
     image: &str,
-    missing: &[&'static str],
+    missing: &[&str],
     host_config: &mut bollard::service::HostConfig,
 ) -> Result<Vec<String>, String> {
     if missing.is_empty() {
@@ -4673,7 +4674,7 @@ async fn migrate_unmounted_volumes(
     let mut migrated = Vec::new();
 
     for vol in missing {
-        let host_dir = format!("{APP_DATA_DIR}/{name}{vol}");
+        let host_dir = format!("{data_dir}/{name}{vol}");
         if let Ok(mut entries) = std::fs::read_dir(&host_dir) {
             if entries.next().is_some() {
                 return Err(format!(
@@ -4690,7 +4691,7 @@ async fn migrate_unmounted_volumes(
         let resolved = std::fs::canonicalize(&host_dir)
             .map_err(|e| format!("Volume path {host_dir} inaccessible: {e}"))?;
         let resolved_str = resolved.to_string_lossy().to_string();
-        if !resolved_str.starts_with(&format!("{APP_DATA_DIR}/")) {
+        if !resolved_str.starts_with(&format!("{data_dir}/")) {
             return Err(format!(
                 "Volume path {host_dir} escapes allowed prefix after canonicalization"
             ));
@@ -4784,7 +4785,7 @@ async fn migrate_unmounted_volumes(
 /// reading of "this container has a mount" is "assume it does not". Zero-downtime is
 /// worth having; it is not worth a corrupted database, and the stop/start path this
 /// falls back to is the same one every blue-green failure already takes.
-fn shares_persistent_state(host_config: &bollard::service::HostConfig) -> bool {
+pub(crate) fn shares_persistent_state(host_config: &bollard::service::HostConfig) -> bool {
     let has_binds = host_config.binds.as_ref().is_some_and(|b| !b.is_empty());
     let has_mounts = host_config.mounts.as_ref().is_some_and(|m| !m.is_empty());
     // `volumes_from` points at another container's mounts, which are shared by
@@ -5364,7 +5365,7 @@ pub async fn update_app(container_id: &str) -> Result<UpdateResult, String> {
     // This is the only window in which it can be rescued, and a failure here MUST abort
     // before the remove below — the whole point is to not destroy what we came to save.
     let migrated =
-        migrate_unmounted_volumes(&docker, container_id, &app_name, &image, &unmounted, &mut host_config)
+        migrate_unmounted_volumes(APP_DATA_DIR, &docker, container_id, &app_name, &image, &unmounted, &mut host_config)
             .await
             .map_err(|e| {
                 format!(
@@ -5551,6 +5552,7 @@ pub async fn change_container_image(container_id: &str, new_image: &str) -> Resu
         .await
         .ok();
     migrate_unmounted_volumes(
+        APP_DATA_DIR,
         &docker,
         container_id,
         &app_name,
@@ -5822,6 +5824,7 @@ pub async fn update_env(
         .await
         .ok();
     migrate_unmounted_volumes(
+        APP_DATA_DIR,
         &docker,
         container_id,
         &app_name,

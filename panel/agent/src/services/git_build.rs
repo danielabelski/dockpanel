@@ -13,6 +13,13 @@ use crate::services::ownership;
 
 const GIT_BASE_DIR: &str = "/var/lib/dockpanel/git";
 
+/// Where a Git Deploy's PERSISTENT VOLUMES live — deliberately separate from
+/// [`GIT_BASE_DIR`], which holds the git checkout/build context and is wiped
+/// and re-cloned on every deploy. Mirrors `docker_apps::APP_DATA_DIR`: a
+/// directory per deploy, named after it, one subdirectory per declared
+/// container path.
+const GIT_DATA_DIR: &str = "/var/lib/dockpanel/git-data";
+
 #[derive(Debug, Serialize)]
 pub struct CloneResult {
     pub commit_hash: String,
@@ -532,6 +539,7 @@ pub async fn deploy_or_update(
     memory_mb: Option<u64>,
     cpu_percent: Option<u64>,
     tls: TlsIntent<'_>,
+    volumes: &[String],
 ) -> Result<GitDeployResult, String> {
     // Held for the whole deploy/update, including the internal blue-green
     // swap this function may perform — `blue_green_update` is called FROM
@@ -581,61 +589,29 @@ pub async fn deploy_or_update(
     let mut exposed_ports = HashMap::new();
     exposed_ports.insert(container_port_key, HashMap::new());
 
-    // ⚠ NO BINDS, DELIBERATELY — and adding them here alone would be a data-loss
-    // regression rather than the fix. Reported as #118: a Git Deploy container
-    // gets no volume and no bind mount, every deploy replaces the container, and
-    // anything the app wrote to its own filesystem is destroyed. The failure is
-    // silent and delayed — everything works until the SECOND deploy — and it has
-    // cost a reporter real customer uploads. Accepted as unbuilt, not declined;
-    // `docs/guides/git-deploy.md` states the limitation and names what does
-    // survive.
+    // PERSISTENT VOLUMES (#118). `volumes` is container-path-only — the host side
+    // is always `{GIT_DATA_DIR}/{name}{path}`, never operator-supplied, for the
+    // same reason `docker_apps::deploy_app` derives it rather than taking
+    // `host_path:container_path`: this agent runs under `ProtectSystem=strict`
+    // with an explicit `ReadWritePaths`, so most free-form host paths would fail
+    // at mkdir anyway, and a bind of `/` or `/etc` would be a container escape.
+    // `services::routes::git_build::deploy_container` enforces this is empty for
+    // any scope other than `Deploy` — a preview must never gain durable storage.
     //
-    // SIX constraints, established while pricing it. Whoever builds this needs
-    // all six.
-    //
-    // ⚠ This header said "five" and "needs all five" from the day it was
-    // written until v2.157.0, above a list that has always run to SIX. A
-    // contributor who obeyed it stopped exactly one item short — and item 6 is
-    // the one that says shipping 1-5 alone DESTROYS the reporter's existing
-    // data on the first deploy after the fix. Item 1 turns a patch into a
-    // regression; item 6 turns a correct patch into data loss. It is last in
-    // the list and first in consequence, so read to the end before writing any
-    // of it. (`docs/guides/git-deploy.md` has said "six" correctly all along —
-    // only this header lagged, and this header is what a contributor reads.)
-    //   1. There are TWO `HostConfig` literals in this file. The blue-green path
-    //      builds its own and copies only memory and CPU from the base, so binds
-    //      added here alone would mount on the first deploy and UN-mount on the
-    //      first blue-green update.
-    //   2. Blue-green then needs the `shares_persistent_state` refusal Docker
-    //      Apps already has, or the old and new containers hold the same host
-    //      paths across a 30-second health check — which corrupts SQLite.
-    //   3. Preview environments inherit this deploy path and must explicitly NOT
-    //      inherit volumes, or a throwaway PR container writes into production
-    //      data — and preview teardown by name would then delete it.
-    //   4. Delete-time cleanup has to capture the data directory from the
-    //      container's binds at the PRE-REMOVAL inspect; where the current
-    //      cleanup runs, the container is already gone. Its "container already
-    //      missing" arm also bypasses the ownership check before reaching
-    //      `remove_dir_all`, which is fine for a re-clonable checkout and very
-    //      much not once real data lives there.
-    //   5. The field is container-path only, with the host side derived. This
-    //      agent runs under `ProtectSystem=strict` with an explicit
-    //      `ReadWritePaths`, so most host paths would fail at mkdir anyway, and
-    //      a free-form bind of `/` or `/etc` is a container escape.
-    //   6. The deploy that ADDS a volume must carry what is already in the
-    //      container's writable layer onto the new mount. Constraints 1-5 all
-    //      protect data written AFTER the volume exists; the reporter's data is
-    //      in the writable layer right now, and every deploy path removes the
-    //      container, which deletes it. Ship without this and the first deploy
-    //      after the fix destroys the files the fix was built to save.
-    //      `docker_apps::migrate_unmounted_volumes` already does exactly this
-    //      for #110 and is the shape to follow, but it cannot be called as it
-    //      stands: its discovery half returns empty for any container without a
-    //      `dockpanel.app.template` label (a git container has none), and it
-    //      takes `&[&'static str]` because template paths are compile-time
-    //      constants while an operator's are runtime `String`s. Note also that
-    //      Docker Apps refuses blue-green on TWO grounds — an unmigrated path as
-    //      well as shared state — which is why constraint 2 alone is not enough.
+    // The two branches below build `host_config.binds` differently on purpose:
+    //   * Fresh deploy (no existing container): every declared path is genuinely
+    //     new, so its directory is created and seeded from whatever the image
+    //     ships there — see `build_fresh_volume_binds`.
+    //   * Existing container: some paths may already be bound from a PRIOR
+    //     deploy (kept as-is — never re-seeded, which would stomp real data with
+    //     the image's shipped defaults) and some may be newly added, in which
+    //     case the data already living in the OLD container's writable layer has
+    //     to be rescued via `docker cp` before that container is removed —
+    //     `docker_apps::migrate_unmounted_volumes` (generalised for #110)
+    //     already does exactly this. See that branch below for why blue-green is
+    //     refused whenever `volumes` is non-empty: it would run the old and new
+    //     containers against the same host paths for the length of the health
+    //     check, which corrupts a single-writer database like SQLite silently.
     let mut host_config = bollard::service::HostConfig {
         port_bindings: Some(port_bindings),
         restart_policy: Some(bollard::service::RestartPolicy {
@@ -694,7 +670,16 @@ pub async fn deploy_or_update(
                 (Some(_), None) => false, // a domain is being added
             };
 
-            // Container exists — check if blue-green is possible
+            // Container exists — check if blue-green is possible. `volumes.is_empty()`
+            // is the persistent-state guard: blue-green runs the old and new
+            // containers against the SAME host paths for the length of the health
+            // check (up to 30s plus an nginx test and reload), which is harmless for
+            // a container whose only state is its own writable layer — the
+            // replacement gets a fresh one — and is silent data corruption for a
+            // single-writer database like SQLite sitting in a bind mount. There is no
+            // way to ask an image whether it tolerates two writers, so ANY declared
+            // volume forces the slower stop/recreate path below, exactly as
+            // `docker_apps::shares_persistent_state` decides for Docker Apps.
             let has_nginx = domain_unchanged
                 && existing_domain.is_some()
                 && existing_port.is_some()
@@ -705,7 +690,7 @@ pub async fn deploy_or_update(
                 ))
                 .exists();
 
-            if has_nginx {
+            if has_nginx && volumes.is_empty() {
                 let bg_domain = existing_domain.as_deref().unwrap();
                 let old_port = existing_port.unwrap();
 
@@ -727,9 +712,16 @@ pub async fn deploy_or_update(
                 )
                 .await;
             }
+            if has_nginx {
+                tracing::info!(
+                    "Not using blue-green for {name}: it has {} declared persistent volume(s). \
+                     Using stop/start instead (brief downtime, no concurrent writers).",
+                    volumes.len()
+                );
+            }
 
-            // No usable vhost to swap — stop + remove + recreate on the port the
-            // panel allocated.
+            // No usable vhost to swap, or volumes forced stop/start — recreate on
+            // the port the panel allocated.
             tracing::info!(
                 "Replacing git container {container_name} (stop/start; domain_unchanged={domain_unchanged})"
             );
@@ -738,6 +730,80 @@ pub async fn deploy_or_update(
                 .stop_container(&container_id, Some(StopContainerOptions { t: 10 }))
                 .await
                 .ok();
+
+            // Stopped, so the app has flushed; not yet removed, so anything a newly
+            // declared volume path needs rescued from the writable layer is still
+            // reachable. This is the only window in which it can be, and a failure
+            // here MUST abort before the remove below — the whole point is to not
+            // destroy what we came to save (#118, mirroring #110's exact fix shape).
+            //
+            // Paths already bound in the OLD container are kept exactly as they are
+            // — filtered down to whatever is STILL declared, so clearing the field
+            // un-mounts a path from the next container without deleting the data
+            // already on disk — and are never re-seeded from the image, which would
+            // stomp real data with the image's shipped defaults. Only a path that is
+            // newly added and not yet mounted goes through migration.
+            let existing_binds: Vec<String> = docker
+                .inspect_container(&container_id, None)
+                .await
+                .ok()
+                .and_then(|info| info.host_config)
+                .and_then(|hc| hc.binds)
+                .unwrap_or_default();
+            let declared: Vec<&str> = volumes.iter().map(String::as_str).collect();
+            let mut kept_binds: Vec<String> = existing_binds
+                .into_iter()
+                .filter(|b| {
+                    b.split_once(':')
+                        .map(|(_, dest)| declared.contains(&dest))
+                        .unwrap_or(false)
+                })
+                .collect();
+            let mounted = super::docker_apps::mounted_destinations(
+                &bollard::service::HostConfig { binds: Some(kept_binds.clone()), ..Default::default() },
+            );
+            let unmounted: Vec<&str> = declared
+                .iter()
+                .copied()
+                .filter(|vol| !mounted.iter().any(|d| d == vol))
+                .collect();
+            if !unmounted.is_empty() {
+                let mut migrate_config = bollard::service::HostConfig {
+                    binds: Some(kept_binds.clone()),
+                    ..Default::default()
+                };
+                match super::docker_apps::migrate_unmounted_volumes(
+                    GIT_DATA_DIR,
+                    &docker,
+                    &container_id,
+                    name,
+                    image_tag,
+                    &unmounted,
+                    &mut migrate_config,
+                )
+                .await
+                {
+                    Ok(migrated) => {
+                        kept_binds = migrate_config.binds.unwrap_or_default();
+                        tracing::info!(
+                            "Migrated {} volume(s) for {name} onto {GIT_DATA_DIR}: {}",
+                            migrated.len(),
+                            migrated.join(", ")
+                        );
+                    }
+                    Err(e) => {
+                        return Err(format!(
+                            "Aborting deploy of {name} without removing the running container: \
+                             {e}. It is stopped and intact; start it again with \
+                             `docker start {container_name}`."
+                        ));
+                    }
+                }
+            }
+            if !kept_binds.is_empty() {
+                host_config.binds = Some(kept_binds);
+            }
+
             docker
                 .remove_container(
                     &container_id,
@@ -810,6 +876,13 @@ pub async fn deploy_or_update(
             // Fresh deploy
             tracing::info!("Deploying new git container: {container_name}");
 
+            if !volumes.is_empty() {
+                let binds = build_fresh_volume_binds(&docker, name, image_tag, volumes).await?;
+                if !binds.is_empty() {
+                    host_config.binds = Some(binds);
+                }
+            }
+
             let container_id = create_and_start(
                 &docker,
                 &container_name,
@@ -840,6 +913,60 @@ pub async fn deploy_or_update(
             })
         }
     }
+}
+
+/// Build bind mounts for a BRAND NEW git-deployed container — one directory per
+/// declared container path under [`GIT_DATA_DIR`], seeded from whatever the
+/// image ships there and chowned to whatever non-root user it runs as.
+///
+/// Mirrors `docker_apps::deploy_app`'s own volume-bind loop (create → canonicalize
+/// → verify the prefix → seed → chown → bind), parameterised on
+/// [`GIT_DATA_DIR`] instead of `APP_DATA_DIR`. Deliberately NOT shared code with
+/// that loop: `deploy_app` is security-sensitive and already proven, and the
+/// mechanical steps here are short enough that duplicating them (as
+/// `docker_apps::migrate_unmounted_volumes` already does for the same steps) is
+/// safer than risking a regression in it to thread a new base directory through.
+///
+/// Only ever called for a FRESH deploy — an existing container's already-mounted
+/// paths are kept as-is and never re-seeded, since seeding stomps real data with
+/// the image's shipped defaults. See the caller for why that split matters.
+async fn build_fresh_volume_binds(
+    docker: &Docker,
+    name: &str,
+    image: &str,
+    volumes: &[String],
+) -> Result<Vec<String>, String> {
+    let owner = super::docker_apps::resolve_volume_owner(docker, image).await;
+    let mut binds = Vec::new();
+    for vol in volumes {
+        let host_dir = format!("{GIT_DATA_DIR}/{name}{vol}");
+        std::fs::create_dir_all(&host_dir)
+            .map_err(|e| format!("Failed to create {host_dir}: {e}"))?;
+        // Canonicalize then re-check the prefix — the check is what proves the
+        // path is one of ours, and it has to happen after symlinks are resolved.
+        let resolved = std::fs::canonicalize(&host_dir)
+            .map_err(|e| format!("Volume path {host_dir} inaccessible: {e}"))?;
+        let resolved_str = resolved.to_string_lossy().to_string();
+        if !resolved_str.starts_with(&format!("{GIT_DATA_DIR}/")) {
+            return Err(format!(
+                "Volume path {host_dir} escapes allowed prefix after canonicalization"
+            ));
+        }
+        // Only ever seeds an empty directory — see `seed_volume_from_image`'s own
+        // doc comment. AFTER the prefix check, for the same reason the chown below
+        // is: the check is what proves the path is one of ours.
+        super::docker_apps::seed_volume_from_image(docker, image, vol, &resolved_str).await;
+        if let Some(owner) = &owner
+            && let Err(e) = super::docker_apps::chown_to(&resolved_str, owner)
+        {
+            tracing::warn!(
+                "Could not chown volume {resolved_str} for {name}: {e}. The app may be \
+                 unable to write its data directory."
+            );
+        }
+        binds.push(format!("{resolved_str}:{vol}"));
+    }
+    Ok(binds)
 }
 
 /// Take down the nginx vhost and certificates for `domain`, but ONLY while they
@@ -922,7 +1049,7 @@ pub async fn cleanup_container(
     // real site can be created on that exact domain and pass every check — and
     // then this cleanup, running unattended on TTL expiry, deletes the site's
     // vhost and certificates five minutes later.
-    let (domain, host_port) = match docker.inspect_container(&container_name, None).await {
+    let (domain, host_port, git_data_dir) = match docker.inspect_container(&container_name, None).await {
         Ok(info) => {
             // Who does it say it is? A TTL sweep runs with nobody watching, and
             // the legacy preview space is shared with real deployments — so
@@ -954,6 +1081,16 @@ pub async fn cleanup_container(
                 info.host_config
                     .as_ref()
                     .and_then(crate::services::docker_apps::extract_host_port),
+                // Ownership of the persistent-volume directory is decided by the
+                // container's OWN binds, never by its name — the same reasoning
+                // `docker_apps::owned_app_dir` documents. Read in this SAME
+                // inspect because after the remove below there is nothing left
+                // to ask: capturing it any later is the #118 constraint that
+                // made this a real feature rather than a one-line field.
+                info.host_config
+                    .as_ref()
+                    .and_then(|hc| hc.binds.as_ref())
+                    .and_then(|binds| owned_git_data_dir(name, binds)),
             )
         }
         // The container is already gone. That used to end the vhost and
@@ -963,9 +1100,16 @@ pub async fn cleanup_container(
         // knows both from its own row; the port still has to match the vhost
         // before anything is removed, so this widens what can be tidied, not
         // what can be destroyed.
+        //
+        // No binds to read means no proof of a volume directory either — left
+        // alone rather than guessed at from the name, exactly like the domain
+        // and port above. A deploy that only ever had none loses nothing; one
+        // that had real data orphans it rather than risking a wrong delete
+        // (the same trade-off `docker_apps::removal_identity` makes).
         Err(_) => (
             known_domain.map(str::to_string),
             known_port,
+            None,
         ),
     };
 
@@ -995,14 +1139,41 @@ pub async fn cleanup_container(
         release_domain_artifacts(d, host_port).await;
     }
 
-    // Remove git repo / volume directory
+    // Remove the git checkout / build context. Always by name: `GIT_BASE_DIR/{name}`
+    // is a re-clonable working copy, never the operator's data, so there is no
+    // ownership question here the way there is for the persistent volume dir below.
     let repo_dir = format!("{GIT_BASE_DIR}/{name}");
     if std::path::Path::new(&repo_dir).exists() {
         std::fs::remove_dir_all(&repo_dir).ok();
         tracing::info!("Removed git repo dir: {repo_dir}");
     }
 
+    // Remove persistent volume data — only when the container's OWN binds proved
+    // it (see above). `GIT_DATA_DIR/{name}` is never touched on a bare name match:
+    // a preview never has one (previews are refused a `volumes` list entirely),
+    // and a deploy whose container could not be inspected leaves it in place
+    // rather than guessing.
+    if let Some(ref dir) = git_data_dir
+        && std::path::Path::new(dir).exists()
+    {
+        std::fs::remove_dir_all(dir).ok();
+        tracing::info!("Removed git volume dir: {dir}");
+    }
+
     Ok(())
+}
+
+/// Which directory under [`GIT_DATA_DIR`] does this container's own binds prove
+/// it owns? Mirrors `docker_apps::owned_app_dir` — only ONE spelling is checked
+/// (git deploys have no naming-migration history the way Docker Apps do), and a
+/// bind outside `GIT_DATA_DIR` (there is only ever one: the checkout itself is
+/// never bind-mounted) yields `None`, which refuses to delete rather than guess.
+fn owned_git_data_dir(name: &str, binds: &[String]) -> Option<String> {
+    let prefix = format!("{GIT_DATA_DIR}/{name}");
+    binds.iter().find_map(|bind| {
+        let source = bind.split(':').next().unwrap_or_default();
+        (source == prefix || source.starts_with(&format!("{prefix}/"))).then(|| prefix.clone())
+    })
 }
 
 /// Prune old images for a git app, keeping the last `keep` images (by creation time).
@@ -1909,4 +2080,30 @@ pub async fn nixpacks_build(
 
     tracing::info!("Nixpacks build succeeded: {image_tag}");
     Ok((image_tag, full_output))
+}
+
+#[cfg(test)]
+mod volume_tests {
+    use super::{owned_git_data_dir, GIT_DATA_DIR};
+
+    /// A neighbour's directory is not this deploy's, and a prefix that stops
+    /// mid-segment must not match — the same shadow `docker_apps::owned_app_dir`
+    /// guards against, checked here for the git-deploy spelling.
+    #[test]
+    fn cleanup_only_deletes_what_this_deploys_own_binds_prove() {
+        let mine = vec![format!("{GIT_DATA_DIR}/myapp/data:/data")];
+        assert_eq!(owned_git_data_dir("myapp", &mine), Some(format!("{GIT_DATA_DIR}/myapp")));
+
+        // A deploy called `myapp-staging` must not answer for `myapp`.
+        let neighbour = vec![format!("{GIT_DATA_DIR}/myapp-staging/data:/data")];
+        assert_eq!(owned_git_data_dir("myapp", &neighbour), None);
+
+        // No binds at all — the common case for a deploy with no declared volumes,
+        // and the ONLY safe answer when the container could not be inspected.
+        assert_eq!(owned_git_data_dir("myapp", &[]), None);
+
+        // A bind that happens to share the name substring but not the path boundary.
+        let substring = vec![format!("{GIT_DATA_DIR}/myapp2/data:/data")];
+        assert_eq!(owned_git_data_dir("myapp", &substring), None);
+    }
 }
