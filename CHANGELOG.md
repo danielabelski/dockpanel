@@ -4,6 +4,20 @@ All notable changes to DockPanel will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.234.1]
+
+### Git Deploy volumes: harden the kept-binds comparison
+
+An independent adversarial review of v2.234.0's persistent-volumes fix (run before the box's Docker
+daemon test finished, not after a defect report) found one narrow, currently-unreachable edge: the
+filter that decides which of an existing container's binds are still declared compared the FULL
+string after the first `:`, so a 3-segment Docker bind (`host:container:mode`, e.g. a manually
+`docker update`-added `:ro`) would have its mode suffix bleed into the comparison and the bind would
+be dropped as "unmounted" — re-migrated via a no-op `docker cp` on the next deploy rather than any
+actual data loss. DockPanel itself never writes a 3-segment bind for a git deploy today, so this
+was not reachable through normal use. Fixed to compare only the container-path segment regardless
+of what follows it.
+
 ## [2.234.0]
 
 ### Git Deploy: Persistent Volumes (GH #118)

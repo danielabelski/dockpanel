@@ -754,8 +754,14 @@ pub async fn deploy_or_update(
             let mut kept_binds: Vec<String> = existing_binds
                 .into_iter()
                 .filter(|b| {
-                    b.split_once(':')
-                        .map(|(_, dest)| declared.contains(&dest))
+                    // `.nth(1)` rather than `split_once` — Docker's bind format is
+                    // `host:container[:mode]`, and this agent never writes a 3-segment git
+                    // deploy bind today, but a mode suffix bleeding into the comparison would
+                    // silently drop an otherwise-correct bind as "unmounted" (re-migrated via
+                    // a no-op `docker cp` next deploy — not data loss, but pointless churn).
+                    b.split(':')
+                        .nth(1)
+                        .map(|dest| declared.contains(&dest))
                         .unwrap_or(false)
                 })
                 .collect();
