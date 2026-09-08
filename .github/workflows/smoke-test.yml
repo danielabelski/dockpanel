@@ -129,7 +129,14 @@ jobs:
           cat > /tmp/install-fetch-deps.sh <<'DEPS'
           set -eux
           if command -v apt-get >/dev/null 2>&1; then
-            apt-get update -qq
+            # -o Acquire::Check-Valid-Until=false: debian:11 (bullseye) is past its
+            # support window, so deb.debian.org/debian-security's Release file is
+            # PERMANENTLY expired, not transiently stale — apt refuses to use it by
+            # default ("Release file ... is expired"), which no retry count fixes.
+            # This is the standard, narrow workaround for reaching an EOL archive
+            # deliberately; it does not weaken anything on a still-supported distro,
+            # since apt only ever has an expired Release file to complain about here.
+            apt-get update -qq -o Acquire::Check-Valid-Until=false
             DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl ca-certificates file >/dev/null
           elif command -v dnf >/dev/null 2>&1; then
             # --allowerasing is load-bearing on amazonlinux:2023: the image ships
