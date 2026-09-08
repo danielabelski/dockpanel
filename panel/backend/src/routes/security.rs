@@ -66,6 +66,7 @@ pub async fn add_firewall_rule(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
     ServerScope(_server_id, agent): ServerScope,
+    headers: HeaderMap,
     Json(body): Json<FirewallRuleRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     if body.port == 0 {
@@ -95,9 +96,14 @@ pub async fn add_firewall_rule(
         .map_err(|e| agent_error("Add firewall rule", e))?;
 
     let rule_name = format!("{port}/{proto}");
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "firewall.add",
-        Some("firewall"), Some(&rule_name), None, None,
+        Some("firewall"), Some(&rule_name), None, ip.as_deref(),
+    ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "firewall.add", Some(&claims.email), ip.as_deref(),
+        Some("firewall"), Some(&rule_name), None, None, "warning",
     ).await;
 
     Ok(Json(result))
@@ -109,6 +115,7 @@ pub async fn delete_firewall_rule(
     AdminUser(claims): AdminUser,
     Path(number): Path<usize>,
     ServerScope(_server_id, agent): ServerScope,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let agent_path = format!("/security/firewall/rules/{}", number);
     agent
@@ -116,9 +123,14 @@ pub async fn delete_firewall_rule(
         .await
         .map_err(|e| agent_error("Delete firewall rule", e))?;
 
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "firewall.delete",
-        Some("firewall"), Some(&format!("rule #{number}")), None, None,
+        Some("firewall"), Some(&format!("rule #{number}")), None, ip.as_deref(),
+    ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "firewall.delete", Some(&claims.email), ip.as_deref(),
+        Some("firewall"), Some(&format!("rule #{number}")), None, None, "warning",
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -143,12 +155,18 @@ pub async fn ssh_disable_password(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
     ServerScope(_server_id, agent): ServerScope,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     agent.post("/security/ssh/disable-password", None).await
         .map_err(|e| agent_error("SSH config", e))?;
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "security.ssh_disable_password",
-        None, None, None, None,
+        None, None, None, ip.as_deref(),
+    ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "security.ssh_disable_password", Some(&claims.email), ip.as_deref(),
+        None, None, None, None, "warning",
     ).await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -158,12 +176,18 @@ pub async fn ssh_enable_password(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
     ServerScope(_server_id, agent): ServerScope,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     agent.post("/security/ssh/enable-password", None).await
         .map_err(|e| agent_error("SSH config", e))?;
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "security.ssh_enable_password",
-        None, None, None, None,
+        None, None, None, ip.as_deref(),
+    ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "security.ssh_enable_password", Some(&claims.email), ip.as_deref(),
+        None, None, None, None, "warning",
     ).await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -173,12 +197,18 @@ pub async fn ssh_disable_root(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
     ServerScope(_server_id, agent): ServerScope,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     agent.post("/security/ssh/disable-root", None).await
         .map_err(|e| agent_error("SSH config", e))?;
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "security.ssh_disable_root",
-        None, None, None, None,
+        None, None, None, ip.as_deref(),
+    ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "security.ssh_disable_root", Some(&claims.email), ip.as_deref(),
+        None, None, None, None, "warning",
     ).await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -188,13 +218,19 @@ pub async fn ssh_change_port(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
     ServerScope(_server_id, agent): ServerScope,
+    headers: HeaderMap,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     agent.post("/security/ssh/change-port", Some(body)).await
         .map_err(|e| agent_error("SSH config", e))?;
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "security.ssh_change_port",
-        None, None, None, None,
+        None, None, None, ip.as_deref(),
+    ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "security.ssh_change_port", Some(&claims.email), ip.as_deref(),
+        None, None, None, None, "warning",
     ).await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -489,12 +525,18 @@ pub async fn setup_panel_jail(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
     ServerScope(_server_id, agent): ServerScope,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     agent.post("/security/panel-jail/setup", None).await
         .map_err(|e| agent_error("Panel jail", e))?;
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "security.panel_jail_setup",
-        None, None, None, None,
+        None, None, None, ip.as_deref(),
+    ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "security.panel_jail_setup", Some(&claims.email), ip.as_deref(),
+        None, None, None, None, "info",
     ).await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -568,6 +610,7 @@ pub async fn canary_status(
 pub async fn canary_arm(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let result = state
         .agents
@@ -607,6 +650,7 @@ pub async fn canary_arm(
         }
     }
 
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db,
         claims.sub,
@@ -615,7 +659,19 @@ pub async fn canary_arm(
         Some("canary"),
         None,
         Some(&format!("Armed {armed} of {total} canary files")),
+        ip.as_deref(),
+    )
+    .await;
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "security.canary_armed",
+        Some(&claims.email),
+        ip.as_deref(),
+        Some("canary"),
         None,
+        Some(&format!("Armed {armed} of {total} canary files")),
+        None,
+        "warning",
     )
     .await;
 
@@ -649,6 +705,10 @@ pub async fn apply_security_fix(
     activity::log_activity(
         &state.db, claims.sub, &claims.email, &format!("security.fix.{fix_type}"),
         Some("security"), Some(target), None, ip.as_deref(),
+    ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, &format!("security.fix.{fix_type}"), Some(&claims.email), ip.as_deref(),
+        Some("security"), Some(target), None, None, "warning",
     ).await;
     Ok(Json(result))
 }

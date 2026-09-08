@@ -230,6 +230,7 @@ pub async fn delete_endpoint(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
     Path(id): Path<Uuid>,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let result = sqlx::query("DELETE FROM webhook_endpoints WHERE id = $1 AND user_id = $2")
         .bind(id).bind(claims.sub)
@@ -240,9 +241,15 @@ pub async fn delete_endpoint(
         return Err(err(StatusCode::NOT_FOUND, "Endpoint not found"));
     }
 
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "webhook_endpoint.delete",
-        Some("webhook"), Some(&id.to_string()), None, None,
+        Some("webhook"), Some(&id.to_string()), None, ip.as_deref(),
+    ).await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db, "webhook_endpoint.delete", Some(&claims.email), ip.as_deref(),
+        Some("webhook"), Some(&id.to_string()), None, None, "warning",
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))

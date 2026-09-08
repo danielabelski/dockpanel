@@ -1223,6 +1223,7 @@ pub async fn remove(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_admin(&claims.role)?;
 
@@ -1347,9 +1348,23 @@ pub async fn remove(
         .await
         .map_err(|e| internal_error("remove git_deploys", e))?;
 
+    let ip = crate::routes::client_ip(&headers);
+
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "git_deploy.remove",
-        Some("git_deploy"), Some(&name), None, None,
+        Some("git_deploy"), Some(&name), None, ip.as_deref(),
+    ).await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "git_deploy.remove",
+        Some(&claims.email),
+        ip.as_deref(),
+        Some("git_deploy"),
+        Some(&name),
+        None,
+        None,
+        "warning",
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))

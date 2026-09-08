@@ -248,6 +248,7 @@ pub async fn delete_zone(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_admin(&claims.role)?;
     let zone = get_zone(&state, id).await?;
@@ -258,9 +259,15 @@ pub async fn delete_zone(
         .await
         .map_err(|e| internal_error("delete cdn zone", e))?;
 
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "cdn.delete",
-        Some("cdn"), Some(&zone.domain), None, None,
+        Some("cdn"), Some(&zone.domain), None, ip.as_deref(),
+    ).await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db, "cdn.delete", Some(&claims.email), ip.as_deref(),
+        Some("cdn"), Some(&zone.domain), None, None, "warning",
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))

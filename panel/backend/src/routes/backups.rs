@@ -330,6 +330,7 @@ pub async fn restore(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Path((id, backup_id)): Path<(Uuid, Uuid)>,
+    headers: axum::http::HeaderMap,
 ) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
     let (domain, agent) = crate::helpers::site_agent_for_caller(&state, id, &claims).await?;
 
@@ -364,6 +365,7 @@ pub async fn restore(
     let email = claims.email.clone();
     let domain_clone = domain.clone();
     let filename = backup.filename.clone();
+    let ip = crate::routes::client_ip(&headers);
 
     tokio::spawn(async move {
         let emit = |step: &str, label: &str, status: &str, msg: Option<String>| {
@@ -439,7 +441,11 @@ pub async fn restore(
                     );
                     activity::log_activity(
                         &db, user_id, &email, "backup.restore_partial",
-                        Some("backup"), Some(&domain_clone), Some(&filename), None,
+                        Some("backup"), Some(&domain_clone), Some(&filename), ip.as_deref(),
+                    ).await;
+                    crate::services::security_hardening::audit_log(
+                        &db, "backup.restore_partial", Some(&email), ip.as_deref(),
+                        Some("backup"), Some(&domain_clone), Some(&filename), None, "warning",
                     ).await;
                     tokio::time::sleep(Duration::from_secs(60)).await;
                     logs.lock().unwrap_or_else(|e| e.into_inner()).remove(&restore_id);
@@ -495,7 +501,11 @@ pub async fn restore(
                 tracing::info!("Backup restored: {filename} for {domain_clone}");
                 activity::log_activity(
                     &db, user_id, &email, "backup.restore",
-                    Some("backup"), Some(&domain_clone), Some(&filename), None,
+                    Some("backup"), Some(&domain_clone), Some(&filename), ip.as_deref(),
+                ).await;
+                crate::services::security_hardening::audit_log(
+                    &db, "backup.restore", Some(&email), ip.as_deref(),
+                    Some("backup"), Some(&domain_clone), Some(&filename), None, "info",
                 ).await;
             }
             Err(e) => {

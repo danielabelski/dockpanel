@@ -505,6 +505,7 @@ pub async fn push_to_prod(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let parent = get_site(&state, id, &claims).await?;
 
@@ -531,6 +532,7 @@ pub async fn push_to_prod(
         .map_err(|e| agent_error("Staging push", e))?;
 
     tracing::info!("Pushed {} → {}", staging.domain, parent.domain);
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db,
         claims.sub,
@@ -539,9 +541,20 @@ pub async fn push_to_prod(
         Some("site"),
         Some(&staging.domain),
         Some(&format!("{} → {}", staging.domain, parent.domain)),
-        None,
+        ip.as_deref(),
     )
     .await;
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "staging.push",
+        Some(&claims.email),
+        ip.as_deref(),
+        Some("site"),
+        Some(&staging.domain),
+        Some(&format!("{} → {}", staging.domain, parent.domain)),
+        None,
+        "warning",
+    ).await;
 
     Ok(Json(serde_json::json!({ "ok": true, "message": format!("Pushed {} → {}", staging.domain, parent.domain) })))
 }
@@ -555,6 +568,7 @@ pub async fn destroy(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let _parent = get_site(&state, id, &claims).await?;
 
@@ -620,6 +634,7 @@ pub async fn destroy(
         .map_err(|e| internal_error("destroy", e))?;
 
     tracing::info!("Staging deleted: {}", staging.domain);
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db,
         claims.sub,
@@ -628,9 +643,20 @@ pub async fn destroy(
         Some("site"),
         Some(&staging.domain),
         None,
-        None,
+        ip.as_deref(),
     )
     .await;
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "staging.delete",
+        Some(&claims.email),
+        ip.as_deref(),
+        Some("site"),
+        Some(&staging.domain),
+        None,
+        None,
+        "warning",
+    ).await;
 
     Ok(Json(serde_json::json!({ "ok": true, "domain": staging.domain })))
 }

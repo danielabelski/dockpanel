@@ -1080,6 +1080,7 @@ pub async fn restore_db_backup(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     // Look up the backup record, verify ownership
     let backup: Option<DatabaseBackup> = sqlx::query_as(
@@ -1177,9 +1178,23 @@ pub async fn restore_db_backup(
         .await
         .map_err(|e| agent_error("Database restore", e))?;
 
+    let ip = crate::routes::client_ip(&headers);
+
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "db_backup.restore",
-        Some("database"), Some(&backup.db_name), Some(&backup.filename), None,
+        Some("database"), Some(&backup.db_name), Some(&backup.filename), ip.as_deref(),
+    ).await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "db_backup.restore",
+        Some(&claims.email),
+        ip.as_deref(),
+        Some("database"),
+        Some(&backup.db_name),
+        Some(&backup.filename),
+        None,
+        "info",
     ).await;
 
     fire_event(&state.db, "db_backup.restored", serde_json::json!({
@@ -1295,6 +1310,7 @@ pub async fn restore_volume_backup(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
     Path(id): Path<Uuid>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     // Look up the volume backup record, scoped to the machines this operator runs.
     //
@@ -1366,9 +1382,23 @@ pub async fn restore_volume_backup(
     ).await
         .map_err(|e| agent_error("Volume restore", e))?;
 
+    let ip = crate::routes::client_ip(&headers);
+
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "volume_backup.restore",
-        Some("volume"), Some(&backup.container_name), Some(&backup.filename), None,
+        Some("volume"), Some(&backup.container_name), Some(&backup.filename), ip.as_deref(),
+    ).await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "volume_backup.restore",
+        Some(&claims.email),
+        ip.as_deref(),
+        Some("volume"),
+        Some(&backup.container_name),
+        Some(&backup.filename),
+        None,
+        "info",
     ).await;
 
     fire_event(&state.db, "volume_backup.restored", serde_json::json!({

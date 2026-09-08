@@ -383,12 +383,14 @@ pub async fn truncate_log(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
     ServerScope(_server_id, agent): ServerScope,
+    headers: axum::http::HeaderMap,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     agent
         .post("/logs/truncate", Some(body))
         .await
         .map_err(|e| agent_error("Truncate", e))?;
+    let ip = crate::routes::client_ip(&headers);
     crate::services::activity::log_activity(
         &state.db,
         claims.sub,
@@ -397,7 +399,19 @@ pub async fn truncate_log(
         None,
         None,
         None,
+        ip.as_deref(),
+    )
+    .await;
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "logs.truncate",
+        Some(&claims.email),
+        ip.as_deref(),
         None,
+        None,
+        None,
+        None,
+        "warning",
     )
     .await;
     Ok(Json(serde_json::json!({ "ok": true })))

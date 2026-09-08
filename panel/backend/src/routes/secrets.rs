@@ -557,6 +557,7 @@ pub async fn inject_to_site(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Path((vault_id, site_id)): Path<(Uuid, Uuid)>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     verify_vault(&state, vault_id, claims.sub).await?;
 
@@ -593,9 +594,23 @@ pub async fn inject_to_site(
     agent.put(&format!("/nginx/env/{}", domain), body).await
         .map_err(|e| agent_error("Inject secrets", e))?;
 
+    let ip = crate::routes::client_ip(&headers);
+
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "secrets.inject",
-        Some("site"), Some(&domain), Some(&format!("{} secrets", rows.len())), None,
+        Some("site"), Some(&domain), Some(&format!("{} secrets", rows.len())), ip.as_deref(),
+    ).await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "secrets.inject",
+        Some(&claims.email),
+        ip.as_deref(),
+        Some("site"),
+        Some(&domain),
+        Some(&format!("{} secrets", rows.len())),
+        None,
+        "warning",
     ).await;
 
     fire_event(&state.db, "secrets.injected", serde_json::json!({

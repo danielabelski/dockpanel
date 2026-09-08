@@ -387,6 +387,19 @@ pub async fn register_begin(
                 None,
             )
             .await;
+
+            crate::services::security_hardening::audit_log(
+                &state.db,
+                "passkey.reauth_failed",
+                Some(&claims.email),
+                None,
+                Some("passkey"),
+                None,
+                None,
+                None,
+                "warning",
+            )
+            .await;
         }
         return Err(e);
     }
@@ -601,6 +614,11 @@ pub async fn register_complete(
     crate::services::activity::log_activity(
         &state.db, claims.sub, &claims.email, "passkey.registered",
         Some("passkey"), Some(name), None, None,
+    ).await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db, "passkey.registered", Some(&claims.email), None,
+        Some("passkey"), Some(name), None, None, "warning",
     ).await;
 
     // Tell the OWNER, not the admins. A planted credential is durable mainly
@@ -1014,6 +1032,7 @@ pub async fn list_passkeys(
 /// DELETE /api/auth/passkeys/{id} — Remove a passkey.
 pub async fn delete_passkey(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     AuthUser(claims): AuthUser,
     axum::extract::Path(id): axum::extract::Path<uuid::Uuid>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
@@ -1028,9 +1047,15 @@ pub async fn delete_passkey(
         return Err(err(StatusCode::NOT_FOUND, "Passkey not found"));
     }
 
+    let ip = crate::routes::client_ip(&headers);
     crate::services::activity::log_activity(
         &state.db, claims.sub, &claims.email, "passkey.deleted",
-        Some("passkey"), None, None, None,
+        Some("passkey"), None, None, ip.as_deref(),
+    ).await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db, "passkey.deleted", Some(&claims.email), ip.as_deref(),
+        Some("passkey"), None, None, None, "warning",
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))

@@ -799,6 +799,7 @@ pub async fn export_config(
 pub async fn import_config(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
+    headers: axum::http::HeaderMap,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let settings_obj = body.get("settings").and_then(|s| s.as_object())
@@ -1052,9 +1053,16 @@ pub async fn import_config(
         }
     }
 
+    let ip = crate::routes::client_ip(&headers);
+
     crate::services::activity::log_activity(
         &state.db, claims.sub, &claims.email, "settings.import",
-        Some("settings"), None, None, None,
+        Some("settings"), None, None, ip.as_deref(),
+    ).await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db, "settings.import", Some(&claims.email), ip.as_deref(),
+        Some("settings"), None, None, None, "warning",
     ).await;
 
     Ok(Json(serde_json::json!({
@@ -1195,6 +1203,7 @@ pub async fn health(
 pub async fn reencrypt_credentials(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let reports =
         crate::services::credential_reencrypt::reencrypt_all(&state.db, &state.config.jwt_secret)
@@ -1204,6 +1213,8 @@ pub async fn reencrypt_credentials(
     let unreadable: i64 = reports.iter().map(|r| r.unreadable).sum();
     let examined: i64 = reports.iter().map(|r| r.examined).sum();
     let raced: i64 = reports.iter().map(|r| r.raced).sum();
+
+    let ip = crate::routes::client_ip(&headers);
 
     activity::log_activity(
         &state.db,
@@ -1215,7 +1226,22 @@ pub async fn reencrypt_credentials(
         Some(&format!(
             "examined {examined}, rewritten {rewritten}, unreadable {unreadable}, raced {raced}"
         )),
+        ip.as_deref(),
+    )
+    .await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "settings.credentials.reencrypt",
+        Some(&claims.email),
+        ip.as_deref(),
+        Some("settings"),
         None,
+        Some(&format!(
+            "examined {examined}, rewritten {rewritten}, unreadable {unreadable}, raced {raced}"
+        )),
+        None,
+        "warning",
     )
     .await;
 

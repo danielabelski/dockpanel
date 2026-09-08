@@ -70,6 +70,7 @@ pub async fn get_config(
 pub async fn update_config(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
+    headers: axum::http::HeaderMap,
     Json(body): Json<WhmcsConfigRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_admin(&claims.role)?;
@@ -159,9 +160,16 @@ pub async fn update_config(
     .await
     .map_err(|e| internal_error("save whmcs config", e))?;
 
+    let ip = crate::routes::client_ip(&headers);
+
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "whmcs.configured",
-        Some("settings"), None, None, None,
+        Some("settings"), None, None, ip.as_deref(),
+    ).await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db, "whmcs.configured", Some(&claims.email), ip.as_deref(),
+        Some("settings"), None, None, None, "warning",
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true, "webhook_secret": webhook_secret })))
@@ -171,14 +179,22 @@ pub async fn update_config(
 pub async fn delete_config(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_admin(&claims.role)?;
 
     sqlx::query("DELETE FROM whmcs_config").execute(&state.db).await.ok();
 
+    let ip = crate::routes::client_ip(&headers);
+
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "whmcs.removed",
-        Some("settings"), None, None, None,
+        Some("settings"), None, None, ip.as_deref(),
+    ).await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db, "whmcs.removed", Some(&claims.email), ip.as_deref(),
+        Some("settings"), None, None, None, "warning",
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))

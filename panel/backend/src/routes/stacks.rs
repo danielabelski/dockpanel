@@ -674,6 +674,7 @@ pub async fn remove(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_admin(&claims.role)?;
 
@@ -741,6 +742,8 @@ pub async fn remove(
         .await
         .map_err(|e| internal_error("remove stacks", e))?;
 
+    let ip = crate::routes::client_ip(&headers);
+
     activity::log_activity(
         &state.db,
         claims.sub,
@@ -749,7 +752,20 @@ pub async fn remove(
         Some("stack"),
         Some(&name),
         None,
+        ip.as_deref(),
+    )
+    .await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "stack.remove",
+        Some(&claims.email),
+        ip.as_deref(),
+        Some("stack"),
+        Some(&name),
         None,
+        None,
+        "warning",
     )
     .await;
 

@@ -27,6 +27,7 @@ use crate::AppState;
 pub async fn create_token(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
+    headers: axum::http::HeaderMap,
     Json(body): Json<serde_json::Value>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
     require_admin(&claims.role)?;
@@ -63,9 +64,16 @@ pub async fn create_token(
     .await
     .map_err(|e| internal_error("create iac token", e))?;
 
+    let ip = crate::routes::client_ip(&headers);
+
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "iac.token_created",
-        Some("iac_token"), Some(name), None, None,
+        Some("iac_token"), Some(name), None, ip.as_deref(),
+    ).await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db, "iac.token_created", Some(&claims.email), ip.as_deref(),
+        Some("iac_token"), Some(name), None, None, "warning",
     ).await;
 
     // Return the raw token ONCE — it cannot be retrieved after this

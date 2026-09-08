@@ -178,6 +178,7 @@ pub async fn remove(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let team: Option<Team> = sqlx::query_as(
         "SELECT * FROM teams WHERE id = $1 AND owner_id = $2",
@@ -196,9 +197,16 @@ pub async fn remove(
         .await
         .map_err(|e| internal_error("remove teams", e))?;
 
+    let ip = crate::routes::client_ip(&headers);
+
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "team.delete",
-        Some("team"), Some(&team.name), None, None,
+        Some("team"), Some(&team.name), None, ip.as_deref(),
+    ).await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db, "team.delete", Some(&claims.email), ip.as_deref(),
+        Some("team"), Some(&team.name), None, None, "warning",
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))

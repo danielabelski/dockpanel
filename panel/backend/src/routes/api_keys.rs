@@ -46,6 +46,7 @@ pub async fn list(
 pub async fn create(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
+    headers: axum::http::HeaderMap,
     Json(body): Json<CreateKeyRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
     let name = body.name.trim();
@@ -85,9 +86,15 @@ pub async fn create(
     .await
     .map_err(|e| internal_error("create api_keys", e))?;
 
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "api_key.created",
-        Some("api_key"), Some(name), None, None,
+        Some("api_key"), Some(name), None, ip.as_deref(),
+    ).await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db, "api_key.created", Some(&claims.email), ip.as_deref(),
+        Some("api_key"), Some(name), None, None, "info",
     ).await;
 
     Ok((
@@ -105,6 +112,7 @@ pub async fn create(
 pub async fn revoke(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
+    headers: axum::http::HeaderMap,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     // Fetch key name before deleting for activity log
@@ -131,9 +139,15 @@ pub async fn revoke(
         return Err(err(StatusCode::NOT_FOUND, "API key not found"));
     }
 
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "api_key.revoked",
-        Some("api_key"), Some(&key_name), None, None,
+        Some("api_key"), Some(&key_name), None, ip.as_deref(),
+    ).await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db, "api_key.revoked", Some(&claims.email), ip.as_deref(),
+        Some("api_key"), Some(&key_name), None, None, "info",
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -143,6 +157,7 @@ pub async fn revoke(
 pub async fn rotate(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
+    headers: axum::http::HeaderMap,
     Path(id): Path<Uuid>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
     // 1. Verify key exists and belongs to user, get name
@@ -180,9 +195,15 @@ pub async fn rotate(
     .await
     .map_err(|e| internal_error("rotate", e))?;
 
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "api_key.rotated",
-        Some("api_key"), Some(&name), None, None,
+        Some("api_key"), Some(&name), None, ip.as_deref(),
+    ).await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db, "api_key.rotated", Some(&claims.email), ip.as_deref(),
+        Some("api_key"), Some(&name), None, None, "info",
     ).await;
 
     Ok((

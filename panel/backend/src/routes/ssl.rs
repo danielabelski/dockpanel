@@ -1175,6 +1175,7 @@ pub async fn revoke(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
     Path(id): Path<Uuid>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     // Same unscoped read as `renew`, and this is the worse half: it deletes the
     // certificate files through the agent and then blanks every `ssl_*` column on
@@ -1237,9 +1238,21 @@ pub async fn revoke(
     rebuild_vhost_after_ssl(&state, &agent, id).await;
 
     tracing::info!("SSL revoked for {} by {}", site.domain, claims.email);
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "ssl.revoke",
-        Some("site"), Some(&site.domain), None, None,
+        Some("site"), Some(&site.domain), None, ip.as_deref(),
+    ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "ssl.revoke",
+        Some(&claims.email),
+        ip.as_deref(),
+        Some("site"),
+        Some(&site.domain),
+        None,
+        None,
+        "warning",
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true, "domain": site.domain })))

@@ -100,6 +100,7 @@ pub async fn list(
 pub async fn create(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
+    headers: axum::http::HeaderMap,
     Json(body): Json<CreateServerRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
     let name = body.name.trim();
@@ -182,6 +183,8 @@ pub async fn create(
         ),
     };
 
+    let caller_ip = crate::routes::client_ip(&headers);
+
     activity::log_activity(
         &state.db,
         claims.sub,
@@ -190,7 +193,20 @@ pub async fn create(
         Some("server"),
         Some(name),
         None,
+        caller_ip.as_deref(),
+    )
+    .await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "server.create",
+        Some(&claims.email),
+        caller_ip.as_deref(),
+        Some("server"),
+        Some(name),
         None,
+        None,
+        "warning",
     )
     .await;
 
@@ -228,6 +244,7 @@ pub async fn get_one(
 pub async fn remove(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
+    headers: axum::http::HeaderMap,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let server: Server =
@@ -253,6 +270,8 @@ pub async fn remove(
     // Invalidate remote agent cache
     state.agents.invalidate(id).await;
 
+    let ip = crate::routes::client_ip(&headers);
+
     activity::log_activity(
         &state.db,
         claims.sub,
@@ -261,7 +280,20 @@ pub async fn remove(
         Some("server"),
         Some(&server.name),
         None,
+        ip.as_deref(),
+    )
+    .await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "server.delete",
+        Some(&claims.email),
+        ip.as_deref(),
+        Some("server"),
+        Some(&server.name),
         None,
+        None,
+        "critical",
     )
     .await;
 
@@ -275,6 +307,7 @@ pub async fn remove(
 pub async fn rotate_cert_pin(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
+    headers: axum::http::HeaderMap,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let server: Server =
@@ -296,6 +329,8 @@ pub async fn rotate_cert_pin(
     // the next time a route needs the agent handle.
     state.agents.invalidate(id).await;
 
+    let ip = crate::routes::client_ip(&headers);
+
     activity::log_activity(
         &state.db,
         claims.sub,
@@ -304,7 +339,20 @@ pub async fn rotate_cert_pin(
         Some("server"),
         Some(&server.name),
         None,
+        ip.as_deref(),
+    )
+    .await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "server.rotate_cert_pin",
+        Some(&claims.email),
+        ip.as_deref(),
+        Some("server"),
+        Some(&server.name),
         None,
+        None,
+        "warning",
     )
     .await;
 
@@ -376,6 +424,7 @@ pub async fn test_connection(
 pub async fn update(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
+    headers: axum::http::HeaderMap,
     Path(id): Path<Uuid>,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<Server>, ApiError> {
@@ -415,6 +464,8 @@ pub async fn update(
     // Invalidate remote agent cache so it picks up new URL/token
     state.agents.invalidate(id).await;
 
+    let caller_ip = crate::routes::client_ip(&headers);
+
     activity::log_activity(
         &state.db,
         claims.sub,
@@ -423,7 +474,20 @@ pub async fn update(
         Some("server"),
         Some(name),
         None,
+        caller_ip.as_deref(),
+    )
+    .await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "server.update",
+        Some(&claims.email),
+        caller_ip.as_deref(),
+        Some("server"),
+        Some(name),
         None,
+        None,
+        "warning",
     )
     .await;
 
@@ -435,6 +499,7 @@ pub async fn update(
 pub async fn rotate_token(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
+    headers: axum::http::HeaderMap,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     // Verify server belongs to this admin
@@ -514,6 +579,8 @@ pub async fn rotate_token(
         }
     }
 
+    let ip = crate::routes::client_ip(&headers);
+
     activity::log_activity(
         &state.db,
         claims.sub,
@@ -522,7 +589,20 @@ pub async fn rotate_token(
         Some("server"),
         None,
         None,
+        ip.as_deref(),
+    )
+    .await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "server.rotate_token",
+        Some(&claims.email),
+        ip.as_deref(),
+        Some("server"),
         None,
+        None,
+        None,
+        "critical",
     )
     .await;
 

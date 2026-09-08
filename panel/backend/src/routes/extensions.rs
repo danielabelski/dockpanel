@@ -131,6 +131,7 @@ pub async fn list(
 pub async fn create(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
+    headers: axum::http::HeaderMap,
     Json(body): Json<CreateExtensionRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
     let name = body.name.trim();
@@ -192,6 +193,7 @@ pub async fn create(
     .await
     .map_err(|e| internal_error("create extensions", e))?;
 
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db,
         claims.sub,
@@ -200,7 +202,20 @@ pub async fn create(
         Some("extension"),
         Some(name),
         None,
+        ip.as_deref(),
+    )
+    .await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "extension.created",
+        Some(&claims.email),
+        ip.as_deref(),
+        Some("extension"),
+        Some(name),
         None,
+        None,
+        "info",
     )
     .await;
 
@@ -343,6 +358,7 @@ pub async fn remove(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
     Path(id): Path<Uuid>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     // Fetch name for activity log
     let ext_info: Option<(String,)> =
@@ -372,6 +388,7 @@ pub async fn remove(
         return Err(err(StatusCode::NOT_FOUND, "Extension not found"));
     }
 
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db,
         claims.sub,
@@ -380,7 +397,20 @@ pub async fn remove(
         Some("extension"),
         Some(&ext_name),
         None,
+        ip.as_deref(),
+    )
+    .await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "extension.deleted",
+        Some(&claims.email),
+        ip.as_deref(),
+        Some("extension"),
+        Some(&ext_name),
         None,
+        None,
+        "warning",
     )
     .await;
 
@@ -529,6 +559,7 @@ pub async fn rotate_secret(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
     Path(id): Path<Uuid>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     // Verify extension exists
     let ext: Option<(String,)> =
@@ -556,6 +587,7 @@ pub async fn rotate_secret(
         .await
         .map_err(|e| internal_error("rotate secret", e))?;
 
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db,
         claims.sub,
@@ -564,7 +596,20 @@ pub async fn rotate_secret(
         Some("extension"),
         Some(&ext_name),
         None,
+        ip.as_deref(),
+    )
+    .await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "extension.rotate_secret",
+        Some(&claims.email),
+        ip.as_deref(),
+        Some("extension"),
+        Some(&ext_name),
         None,
+        None,
+        "info",
     )
     .await;
 

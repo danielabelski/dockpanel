@@ -315,6 +315,7 @@ pub async fn create(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     ServerScope(server_id, agent): ServerScope,
+    headers: axum::http::HeaderMap,
     Json(body): Json<CreateCertificateRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
     require_admin(&claims.role)?;
@@ -405,6 +406,8 @@ pub async fn create(
         }
     })?;
 
+    let ip = crate::routes::client_ip(&headers);
+
     activity::log_activity(
         &state.db,
         claims.sub,
@@ -413,7 +416,20 @@ pub async fn create(
         Some("tls_certificate"),
         Some(&row.alias),
         None,
+        ip.as_deref(),
+    )
+    .await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "tls_certificate.create",
+        Some(&claims.email),
+        ip.as_deref(),
+        Some("tls_certificate"),
+        Some(&row.alias),
         None,
+        None,
+        "warning",
     )
     .await;
 
@@ -435,6 +451,7 @@ pub async fn replace(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<ReplaceCertificateRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_admin(&claims.role)?;
@@ -488,6 +505,8 @@ pub async fn replace(
     .await
     .map_err(|e| internal_error("replace tls certificate", e))?;
 
+    let ip = crate::routes::client_ip(&headers);
+
     activity::log_activity(
         &state.db,
         claims.sub,
@@ -496,7 +515,20 @@ pub async fn replace(
         Some("tls_certificate"),
         Some(&updated.alias),
         None,
+        ip.as_deref(),
+    )
+    .await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "tls_certificate.replace",
+        Some(&claims.email),
+        ip.as_deref(),
+        Some("tls_certificate"),
+        Some(&updated.alias),
         None,
+        None,
+        "warning",
     )
     .await;
 
@@ -513,6 +545,7 @@ pub async fn remove(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_admin(&claims.role)?;
 
@@ -554,6 +587,8 @@ pub async fn remove(
         .await
         .map_err(|e| internal_error("delete tls certificate", e))?;
 
+    let ip = crate::routes::client_ip(&headers);
+
     activity::log_activity(
         &state.db,
         claims.sub,
@@ -562,7 +597,20 @@ pub async fn remove(
         Some("tls_certificate"),
         Some(&row.alias),
         None,
+        ip.as_deref(),
+    )
+    .await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "tls_certificate.delete",
+        Some(&claims.email),
+        ip.as_deref(),
+        Some("tls_certificate"),
+        Some(&row.alias),
         None,
+        None,
+        "warning",
     )
     .await;
 

@@ -1918,6 +1918,7 @@ pub async fn registry_login(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     ServerScope(_server_id, agent): ServerScope,
+    headers: axum::http::HeaderMap,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_admin(&claims.role)?;
@@ -1925,6 +1926,7 @@ pub async fn registry_login(
         .post("/apps/registry-login", Some(body))
         .await
         .map_err(|e| agent_error("Registry login", e))?;
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db,
         claims.sub,
@@ -1933,7 +1935,19 @@ pub async fn registry_login(
         Some("registry"),
         None,
         None,
+        ip.as_deref(),
+    )
+    .await;
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "app.registry_login",
+        Some(&claims.email),
+        ip.as_deref(),
+        Some("registry"),
         None,
+        None,
+        None,
+        "warning",
     )
     .await;
     Ok(Json(result))
@@ -2141,6 +2155,7 @@ pub async fn remove_app(
     AuthUser(claims): AuthUser,
     ServerScope(server_id, agent): ServerScope,
     Path(container_id): Path<String>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_admin(&claims.role)?;
 
@@ -2263,9 +2278,14 @@ pub async fn remove_app(
     }
 
     tracing::info!("App removed: {}", container_id);
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "app.remove",
-        Some("app"), Some(&container_id), None, None,
+        Some("app"), Some(&container_id), None, ip.as_deref(),
+    ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "app.remove", Some(&claims.email), ip.as_deref(),
+        Some("app"), Some(&container_id), None, None, "warning",
     ).await;
 
     fire_event(&state.db, "app.removed", serde_json::json!({
@@ -2425,6 +2445,7 @@ pub async fn list_policies(
 pub async fn create_policy(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
+    headers: axum::http::HeaderMap,
     Json(body): Json<PolicyRequest>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
     require_admin(&claims.role)?;
@@ -2469,9 +2490,14 @@ pub async fn create_policy(
     .await
     .map_err(|e| internal_error("create container policy", e))?;
 
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "container_policy.created",
-        Some("container_policy"), Some(&user_id.to_string()), None, None,
+        Some("container_policy"), Some(&user_id.to_string()), None, ip.as_deref(),
+    ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "container_policy.created", Some(&claims.email), ip.as_deref(),
+        Some("container_policy"), Some(&user_id.to_string()), None, None, "warning",
     ).await;
 
     Ok((StatusCode::CREATED, Json(serde_json::json!({ "ok": true, "id": id.0 }))))
@@ -2519,6 +2545,7 @@ pub async fn update_policy(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(user_id): Path<Uuid>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<PolicyRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_admin(&claims.role)?;
@@ -2545,9 +2572,14 @@ pub async fn update_policy(
         return Err(err(StatusCode::NOT_FOUND, "Policy not found for this user"));
     }
 
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "container_policy.updated",
-        Some("container_policy"), Some(&user_id.to_string()), None, None,
+        Some("container_policy"), Some(&user_id.to_string()), None, ip.as_deref(),
+    ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "container_policy.updated", Some(&claims.email), ip.as_deref(),
+        Some("container_policy"), Some(&user_id.to_string()), None, None, "warning",
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))

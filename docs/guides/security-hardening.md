@@ -341,7 +341,7 @@ The panic button performs an emergency lockdown: kills all active terminal sessi
 
 ### Immutable Audit Log
 
-All security events are written to the `security_audit_log` table, and a PostgreSQL trigger rejects `UPDATE` and `DELETE` on it. That trigger is the guarantee — it is what makes the record in the database immutable, and it is what the panel reads.
+Security events, and every destructive or privilege-sensitive action across the panel — deleting a site, server, or user; promoting or demoting a reseller; resetting another user's password or 2FA; rotating a secret, API key, or server token; disabling SSH password auth; transferring a site — are written to the `security_audit_log` table, and a PostgreSQL trigger rejects `UPDATE` and `DELETE` on it. That trigger is the guarantee — it is what makes the record in the database immutable, and it is what the panel reads. This is deliberately broader than the general activity log (**Sites** and other pages' own activity views, backed by the mutable `activity_logs` table): a compromised admin account or a malicious insider with panel access can edit or delete an `activity_logs` row, but not a `security_audit_log` one.
 
 Every event is **also** appended to a dated file on disk at `/var/lib/dockpanel/audit/`, as a convenience copy for host-level forensics and log shipping. **What this does not do, stated plainly:** those files are written in append mode, but nothing sets a kernel append-only attribute on them, so a process that can write the directory can still rewrite one in place. Treat the on-disk copies as a convenience, not as evidence — the database is the authoritative record. Nothing in DockPanel reads these files back; they are for you and your own tooling.
 

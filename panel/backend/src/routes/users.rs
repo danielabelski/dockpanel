@@ -171,6 +171,10 @@ pub async fn create(
         &state.db, claims.sub, &claims.email, "user.create",
         Some("user"), Some(&user.email), Some(role), ip.as_deref(),
     ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "user.create", Some(&claims.email), ip.as_deref(),
+        Some("user"), Some(&user.email), Some(role), None, "warning",
+    ).await;
 
     // GAP 42: Send welcome email (best-effort, skip silently if SMTP not configured)
     {
@@ -207,6 +211,7 @@ pub async fn create(
 pub async fn update(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
+    headers: HeaderMap,
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateUserRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
@@ -295,9 +300,14 @@ pub async fn update(
         crate::routes::auth::revoke_all_user_sessions(&state, id).await;
     }
 
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "user.update",
-        Some("user"), Some(&_user.email), None, None,
+        Some("user"), Some(&_user.email), None, ip.as_deref(),
+    ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "user.update", Some(&claims.email), ip.as_deref(),
+        Some("user"), Some(&_user.email), None, None, "warning",
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -377,6 +387,10 @@ pub async fn toggle_suspend(
         &state.db, claims.sub, &claims.email, action,
         Some("user"), Some(&user.email), Some(&new_role), ip.as_deref(),
     ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, action, Some(&claims.email), ip.as_deref(),
+        Some("user"), Some(&user.email), Some(&new_role), None, "warning",
+    ).await;
 
     Ok(Json(serde_json::json!({
         "ok": true,
@@ -452,6 +466,10 @@ pub async fn reset_password(
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "user.reset_password",
         Some("user"), Some(&user.email), None, ip.as_deref(),
+    ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "user.reset_password", Some(&claims.email), ip.as_deref(),
+        Some("user"), Some(&user.email), None, None, "warning",
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true, "email": user.email })))
@@ -530,6 +548,10 @@ pub async fn reset_2fa(
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "user.reset_2fa",
         Some("user"), Some(&user.email), None, ip.as_deref(),
+    ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "user.reset_2fa", Some(&claims.email), ip.as_deref(),
+        Some("user"), Some(&user.email), None, None, "warning",
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true, "email": user.email })))
@@ -651,18 +673,22 @@ pub async fn remove(
         );
     }
     let ip = crate::routes::client_ip(&headers);
+    // The `details` slot, so the reassignment is in the audit trail rather
+    // than only in the response the operator may never read. Bound once so
+    // both the mutable activity log and the immutable audit log carry the
+    // same value.
+    let details = if reassigned.is_empty() {
+        None
+    } else {
+        Some(format!("reassigned servers: {}", reassigned.join(", ")))
+    };
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "user.delete",
-        Some("user"), Some(&user.email),
-        // The `details` slot, so the reassignment is in the audit trail rather
-        // than only in the response the operator may never read.
-        if reassigned.is_empty() {
-            None
-        } else {
-            Some(format!("reassigned servers: {}", reassigned.join(", ")))
-        }
-        .as_deref(),
-        ip.as_deref(),
+        Some("user"), Some(&user.email), details.as_deref(), ip.as_deref(),
+    ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "user.delete", Some(&claims.email), ip.as_deref(),
+        Some("user"), Some(&user.email), details.as_deref(), None, "warning",
     ).await;
 
     Ok(Json(serde_json::json!({

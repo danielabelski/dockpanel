@@ -202,8 +202,16 @@ check "clearing or setting the flag is written to the audit log" \
 # It goes to the immutable table specifically. The activity feed is editable
 # state; the point of the record is that the account disarming its own guard
 # cannot then remove the evidence.
+#
+# Scoped to `update()`'s own body (bounded on the next `pub async fn`, not a
+# fixed line window) rather than grepped across the whole file: the resource-
+# mutation audit-log extension (s480) legitimately added a SECOND, unrelated
+# security_hardening::audit_log call to this file (in `remove()`, for
+# git_deploy.remove) — a whole-file count of "1" was only ever true by
+# incidental exclusivity, never the actual property this check means to pin.
+awk '/^pub async fn update\(/{f=1} f&&/^pub async fn /&&!/^pub async fn update\(/{exit} f{print}' "$API" > "$TMP/update_fn"
 check "the record goes to the immutable log, not the activity feed" \
-      "$(grep -c 'security_hardening::audit_log' "$API")" "1"
+      "$(grep -c 'security_hardening::audit_log' "$TMP/update_fn")" "1"
 # A COALESCE write cannot tell "set to true" from "left true", so the previous
 # value has to be read for the comparison to mean anything. Without this the
 # log would fire on every unrelated field edit.

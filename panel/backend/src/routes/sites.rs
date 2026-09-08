@@ -2066,6 +2066,10 @@ pub async fn remove(
         &state.db, claims.sub, &claims.email, "site.delete",
         Some("site"), Some(&site.domain), None, ip.as_deref(),
     ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "site.delete", Some(&claims.email), ip.as_deref(),
+        Some("site"), Some(&site.domain), None, None, "critical",
+    ).await;
 
     // Panel notification
     // Deliberately unlinked: every other site notification carries
@@ -2861,6 +2865,7 @@ pub async fn upload_ssl(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
+    headers: HeaderMap,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let (domain, agent) = crate::helpers::site_agent_for_caller(&state, id, &claims).await?;
@@ -2962,8 +2967,13 @@ pub async fn upload_ssl(
     // a fix to one instance of a pattern owes a grep for the pattern.
     crate::routes::ssl::rebuild_vhost_after_ssl(&state, &agent, id).await;
 
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(&state.db, claims.sub, &claims.email, "ssl.upload",
-        Some("site"), Some(&domain), None, None).await;
+        Some("site"), Some(&domain), None, ip.as_deref()).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "ssl.upload", Some(&claims.email), ip.as_deref(),
+        Some("site"), Some(&domain), None, None, "warning",
+    ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -3578,6 +3588,7 @@ pub async fn toggle_waf(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
+    headers: HeaderMap,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let site: crate::models::Site = sqlx::query_as(
@@ -3628,10 +3639,17 @@ pub async fn toggle_waf(
 
     let action = if enabled { format!("enabled ({mode})") } else { "disabled".to_string() };
     tracing::info!("WAF {action} for {}", site.domain);
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email,
         &format!("site.waf.{}", if enabled { "enabled" } else { "disabled" }),
-        Some("site"), Some(&site.domain), None, None,
+        Some("site"), Some(&site.domain), None, ip.as_deref(),
+    ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        &format!("site.waf.{}", if enabled { "enabled" } else { "disabled" }),
+        Some(&claims.email), ip.as_deref(),
+        Some("site"), Some(&site.domain), None, None, "warning",
     ).await;
 
     notifications::notify_panel(&state.db, Some(claims.sub),
@@ -3880,6 +3898,7 @@ pub async fn toggle_bot_protection(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
+    headers: HeaderMap,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let site: crate::models::Site = sqlx::query_as(
@@ -3916,10 +3935,17 @@ pub async fn toggle_bot_protection(
         agent_body,
     ).await.map_err(|e| agent_error("Bot protection nginx config", e))?;
 
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email,
         &format!("site.bot_protection.{mode}"),
-        Some("site"), Some(&site.domain), None, None,
+        Some("site"), Some(&site.domain), None, ip.as_deref(),
+    ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        &format!("site.bot_protection.{mode}"),
+        Some(&claims.email), ip.as_deref(),
+        Some("site"), Some(&site.domain), None, None, "warning",
     ).await;
 
     Ok(Json(serde_json::json!({
@@ -4085,6 +4111,18 @@ pub async fn transfer(
         Some(&domain),
         Some(&format!("{previous_owner} -> {new_owner} ({email})")),
         crate::routes::client_ip(&headers).as_deref(),
+    )
+    .await;
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "site.transfer",
+        Some(&claims.email),
+        crate::routes::client_ip(&headers).as_deref(),
+        Some("site"),
+        Some(&domain),
+        Some(&format!("{previous_owner} -> {new_owner} ({email})")),
+        None,
+        "critical",
     )
     .await;
 

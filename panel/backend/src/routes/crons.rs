@@ -240,6 +240,7 @@ pub async fn remove(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Path((id, cron_id)): Path<(Uuid, Uuid)>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let (domain, agent) = crate::helpers::site_agent_for_caller(&state, id, &claims).await?;
 
@@ -261,9 +262,15 @@ pub async fn remove(
     sync_crons_to_agent(&state, &agent, id).await?;
 
     tracing::info!("Cron deleted: {cron_id} for {domain}");
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "cron.delete",
-        Some("cron"), Some(&domain), None, None,
+        Some("cron"), Some(&domain), None, ip.as_deref(),
+    ).await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db, "cron.delete", Some(&claims.email), ip.as_deref(),
+        Some("cron"), Some(&domain), None, None, "warning",
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))

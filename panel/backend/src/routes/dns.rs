@@ -923,9 +923,11 @@ pub async fn delete_record(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Path((id, record_id)): Path<(Uuid, String)>,
+    req_headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_admin(&claims.role)?;
     let zone = get_zone(&state, id).await?;
+    let ip = crate::routes::client_ip(&req_headers);
 
     if record_id.is_empty() || record_id.len() > 256 {
         return Err(err(StatusCode::BAD_REQUEST, "Invalid record ID"));
@@ -963,7 +965,12 @@ pub async fn delete_record(
 
             activity::log_activity(
                 &state.db, claims.sub, &claims.email, "dns.record.delete",
-                Some("dns"), Some(&zone.domain), None, None,
+                Some("dns"), Some(&zone.domain), None, ip.as_deref(),
+            ).await;
+
+            crate::services::security_hardening::audit_log(
+                &state.db, "dns.record.delete", Some(&claims.email), ip.as_deref(),
+                Some("dns"), Some(&zone.domain), None, None, "warning",
             ).await;
 
             Ok(Json(serde_json::json!({ "ok": true })))
@@ -1032,7 +1039,12 @@ pub async fn delete_record(
 
             activity::log_activity(
                 &state.db, claims.sub, &claims.email, "dns.record.delete",
-                Some("dns"), Some(&zone.domain), None, None,
+                Some("dns"), Some(&zone.domain), None, ip.as_deref(),
+            ).await;
+
+            crate::services::security_hardening::audit_log(
+                &state.db, "dns.record.delete", Some(&claims.email), ip.as_deref(),
+                Some("dns"), Some(&zone.domain), None, None, "warning",
             ).await;
 
             Ok(Json(serde_json::json!({ "ok": true })))
@@ -1462,10 +1474,12 @@ pub async fn cf_update_setting(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
+    req_headers: axum::http::HeaderMap,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_admin(&claims.role)?;
     let zone = get_zone(&state, id).await?;
+    let ip = crate::routes::client_ip(&req_headers);
 
     if zone.provider != "cloudflare" {
         return Err(err(StatusCode::BAD_REQUEST, "Only available for Cloudflare zones"));
@@ -1551,7 +1565,12 @@ pub async fn cf_update_setting(
     activity::log_activity(
         &state.db, claims.sub, &claims.email,
         &format!("dns.cf.setting.{setting}"),
-        Some("dns_zone"), Some(&zone.domain), None, None,
+        Some("dns_zone"), Some(&zone.domain), None, ip.as_deref(),
+    ).await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db, &format!("dns.cf.setting.{setting}"), Some(&claims.email), ip.as_deref(),
+        Some("dns_zone"), Some(&zone.domain), None, None, "warning",
     ).await;
 
     Ok(Json(serde_json::json!({

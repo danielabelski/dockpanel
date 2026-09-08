@@ -239,6 +239,10 @@ pub async fn login(
                     &state.db, u.id, &u.email, "auth.login_failed",
                     None, None, None, Some(&ip),
                 ).await;
+                crate::services::security_hardening::audit_log(
+                    &state.db, "auth.login_failed", Some(&u.email), Some(&ip),
+                    None, None, None, None, "warning",
+                ).await;
                 return Err(err(StatusCode::UNAUTHORIZED, "Invalid credentials"));
             }
             u
@@ -263,6 +267,10 @@ pub async fn login(
             activity::log_activity_system(
                 &state.db, &body.email, "auth.login_failed",
                 None, None, Some("unknown_user"), Some(&ip), None,
+            ).await;
+            crate::services::security_hardening::audit_log(
+                &state.db, "auth.login_failed", Some(&body.email), Some(&ip),
+                None, None, Some("unknown_user"), None, "warning",
             ).await;
             return Err(err(StatusCode::UNAUTHORIZED, "Invalid credentials"));
         }
@@ -1058,6 +1066,10 @@ pub async fn reset_password(
         &state.db, user.id, &user.email, "auth.password_reset",
         None, None, None, None,
     ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "auth.password_reset", Some(&user.email), None,
+        None, None, None, None, "warning",
+    ).await;
 
     // Panel notification
     notifications::notify_panel(&state.db, Some(user.id), "Password reset", "Your password was reset successfully", "warning", "security", Some("/account")).await;
@@ -1404,6 +1416,7 @@ pub struct TwoFaVerifyRequest {
 pub async fn twofa_enable(
     AuthUser(claims): AuthUser,
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<TwoFaVerifyRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let user: User = sqlx::query_as("SELECT * FROM users WHERE id = $1")
@@ -1453,9 +1466,14 @@ pub async fn twofa_enable(
     .await
     .map_err(|e| internal_error("2FA enable", e))?;
 
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "auth.2fa_enabled",
-        None, None, None, None,
+        None, None, None, ip.as_deref(),
+    ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "auth.2fa_enabled", Some(&claims.email), ip.as_deref(),
+        None, None, None, None, "warning",
     ).await;
 
     Ok(Json(serde_json::json!({
@@ -1641,6 +1659,7 @@ pub struct TwoFaDisableRequest {
 pub async fn twofa_disable(
     AuthUser(claims): AuthUser,
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<TwoFaDisableRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let user: User = sqlx::query_as("SELECT * FROM users WHERE id = $1")
@@ -1704,9 +1723,14 @@ pub async fn twofa_disable(
     .await
     .map_err(|e| internal_error("2FA disable", e))?;
 
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "auth.2fa_disabled",
-        None, None, None, None,
+        None, None, None, ip.as_deref(),
+    ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "auth.2fa_disabled", Some(&claims.email), ip.as_deref(),
+        None, None, None, None, "warning",
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true, "message": "2FA has been disabled" })))
@@ -1735,6 +1759,7 @@ pub struct TwoFaRegenerateRequest {
 pub async fn twofa_regenerate_recovery_codes(
     AuthUser(claims): AuthUser,
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<TwoFaRegenerateRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let user: User = sqlx::query_as("SELECT * FROM users WHERE id = $1")
@@ -1792,9 +1817,14 @@ pub async fn twofa_regenerate_recovery_codes(
         .await
         .map_err(|e| internal_error("2FA recovery codes", e))?;
 
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "auth.2fa_recovery_codes_regenerated",
-        None, None, None, None,
+        None, None, None, ip.as_deref(),
+    ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "auth.2fa_recovery_codes_regenerated", Some(&claims.email), ip.as_deref(),
+        None, None, None, None, "warning",
     ).await;
 
     Ok(Json(serde_json::json!({
@@ -1860,6 +1890,7 @@ pub async fn twofa_status(
 pub async fn change_password(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
+    headers: HeaderMap,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let current = body.get("current_password").and_then(|v| v.as_str())
@@ -1930,9 +1961,14 @@ pub async fn change_password(
         }
     }
 
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "auth.password_change",
-        None, None, None, None,
+        None, None, None, ip.as_deref(),
+    ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "auth.password_change", Some(&claims.email), ip.as_deref(),
+        None, None, None, None, "warning",
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true, "message": "Password changed successfully" })))
@@ -1943,6 +1979,7 @@ pub async fn change_password(
 pub async fn revoke_all_sessions(
     State(state): State<AppState>,
     crate::auth::AdminUser(claims): crate::auth::AdminUser,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let now = chrono::Utc::now();
     // Store a timestamp marker — auth middleware checks this to invalidate older tokens
@@ -1961,9 +1998,14 @@ pub async fn revoke_all_sessions(
         *cached = Some(now.timestamp());
     }
 
+    let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "auth.revoke_all",
-        None, None, None, None,
+        None, None, None, ip.as_deref(),
+    ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "auth.revoke_all", Some(&claims.email), ip.as_deref(),
+        None, None, None, None, "warning",
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true, "message": "All sessions revoked. Users will need to re-login." })))

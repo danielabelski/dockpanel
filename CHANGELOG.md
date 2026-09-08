@@ -4,6 +4,36 @@ All notable changes to DockPanel will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.235.0]
+
+### Immutable audit trail extended to destructive and privilege-sensitive mutations
+
+DockPanel has always had two logging paths: a general activity log (mutable, no protection against
+an `UPDATE`/`DELETE`) and an immutable security audit log (a Postgres trigger blocks `UPDATE`/`DELETE`
+on it, plus an append-only tamper-resistant file). The immutable path was scoped narrowly — login
+events, a handful of security-hardening actions, and Git Deploy protection changes — while every
+other destructive or privilege-sensitive action (deleting a site, server, or user; promoting or
+demoting a reseller; resetting another user's password or 2FA; rotating a secret, API key, or server
+token; disabling SSH password auth; transferring a site) only ever reached the mutable table. With
+teams and resellers meaning multiple real people can hold panel access, a compromised admin account
+or a malicious insider could perform one of those actions and then edit or delete the one record of
+it — leaving zero forensic trace.
+
+96 call sites across 32 route files, classified as destructive, privilege-changing, credential-
+lifecycle, or infrastructure-topology mutations, now ALSO write an immutable audit log entry
+alongside the existing activity log call — same actor, same target, same details, the real caller IP
+threaded through wherever it wasn't already available. A live-verification pass against this box's
+real Postgres during development found one more: the login handler's "no such account" branch used a
+third, rarer logging call this session's initial survey didn't cover — the one branch, by the
+existing code's own account, that actually matters for detecting credential stuffing and username
+enumeration, since those attempts are by definition against emails that don't exist. Fixed and
+covered by its own pin assertion, distinct from the sibling "wrong password for a real account"
+branch.
+
+No new endpoints, no schema migration, no behavioural change to any response — this is additive
+logging only, live-verified end to end (including that the immutability trigger itself rejects a
+direct `UPDATE`/`DELETE`) before shipping.
+
 ## [2.234.1]
 
 ### Git Deploy volumes: harden the kept-binds comparison

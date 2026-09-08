@@ -251,6 +251,7 @@ pub async fn update_user(
     State(state): State<AppState>,
     ResellerUser(claims): ResellerUser,
     Path(id): Path<Uuid>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<UpdateUserRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     // Verify user belongs to this reseller (or admin has universal access)
@@ -324,6 +325,8 @@ pub async fn update_user(
         crate::routes::auth::revoke_all_user_sessions(&state, id).await;
     }
 
+    let ip = crate::routes::client_ip(&headers);
+
     activity::log_activity(
         &state.db,
         claims.sub,
@@ -332,7 +335,20 @@ pub async fn update_user(
         Some("user"),
         Some(&user.1),
         None,
+        ip.as_deref(),
+    )
+    .await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "reseller.user.update",
+        Some(&claims.email),
+        ip.as_deref(),
+        Some("user"),
+        Some(&user.1),
         None,
+        None,
+        "warning",
     )
     .await;
 
@@ -344,6 +360,7 @@ pub async fn delete_user(
     State(state): State<AppState>,
     ResellerUser(claims): ResellerUser,
     Path(id): Path<Uuid>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     if id == claims.sub {
         return Err(err(
@@ -404,6 +421,8 @@ pub async fn delete_user(
         claims.email,
         user.1
     );
+    let ip = crate::routes::client_ip(&headers);
+
     activity::log_activity(
         &state.db,
         claims.sub,
@@ -412,7 +431,20 @@ pub async fn delete_user(
         Some("user"),
         Some(&user.1),
         None,
+        ip.as_deref(),
+    )
+    .await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "reseller.user.delete",
+        Some(&claims.email),
+        ip.as_deref(),
+        Some("user"),
+        Some(&user.1),
         None,
+        None,
+        "warning",
     )
     .await;
 

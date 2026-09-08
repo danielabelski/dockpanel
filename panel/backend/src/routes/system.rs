@@ -727,10 +727,16 @@ pub async fn add_ssh_key(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
     ServerScope(_server_id, agent): ServerScope,
+    headers: axum::http::HeaderMap,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let result = agent.post("/ssh-keys", Some(body)).await.map_err(|e| agent_error("Add SSH key", e))?;
-    activity::log_activity(&state.db, claims.sub, &claims.email, "ssh.key.add", Some("system"), None, None, None).await;
+    let ip = crate::routes::client_ip(&headers);
+    activity::log_activity(&state.db, claims.sub, &claims.email, "ssh.key.add", Some("system"), None, None, ip.as_deref()).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "ssh.key.add", Some(&claims.email), ip.as_deref(),
+        Some("system"), None, None, None, "warning",
+    ).await;
     Ok(Json(result))
 }
 
@@ -739,9 +745,15 @@ pub async fn remove_ssh_key(
     AdminUser(claims): AdminUser,
     axum::extract::Path(fingerprint): axum::extract::Path<String>,
     ServerScope(_server_id, agent): ServerScope,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let result = agent.delete(&format!("/ssh-keys/{fingerprint}")).await.map_err(|e| agent_error("Remove SSH key", e))?;
-    activity::log_activity(&state.db, claims.sub, &claims.email, "ssh.key.remove", Some("system"), None, None, None).await;
+    let ip = crate::routes::client_ip(&headers);
+    activity::log_activity(&state.db, claims.sub, &claims.email, "ssh.key.remove", Some("system"), None, None, ip.as_deref()).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "ssh.key.remove", Some(&claims.email), ip.as_deref(),
+        Some("system"), None, None, None, "warning",
+    ).await;
     Ok(Json(result))
 }
 
@@ -786,6 +798,7 @@ pub async fn install_powerdns(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
     ServerScope(server_id, agent): ServerScope,
+    headers: axum::http::HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
     // pdns_api_url/pdns_api_key live in the global `settings` table (no per-server
@@ -844,6 +857,7 @@ pub async fn install_powerdns(
     let jwt_secret = state.config.jwt_secret.clone();
     let user_id = claims.sub;
     let email = claims.email.clone();
+    let ip = crate::routes::client_ip(&headers);
 
     tokio::spawn(async move {
         let emit = |step: &str, lbl: &str, status: &str, msg: Option<String>| {
@@ -895,7 +909,11 @@ pub async fn install_powerdns(
                 emit("complete", "PowerDNS installed", "done", None);
                 activity::log_activity(
                     &db, user_id, &email, "service.install",
-                    Some("system"), Some("powerdns"), None, None,
+                    Some("system"), Some("powerdns"), None, ip.as_deref(),
+                ).await;
+                crate::services::security_hardening::audit_log(
+                    &db, "service.install", Some(&email), ip.as_deref(),
+                    Some("system"), Some("powerdns"), None, None, "warning",
                 ).await;
                 tracing::info!("Service installed: PowerDNS");
             }
@@ -1027,6 +1045,7 @@ pub async fn uninstall_powerdns(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
     ServerScope(server_id, agent): ServerScope,
+    headers: axum::http::HeaderMap,
 ) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
     // Custom (not the shared install_service_with_log helper) because a successful
     // uninstall must also free the `pdns_server_id` ownership slot install_powerdns
@@ -1046,6 +1065,7 @@ pub async fn uninstall_powerdns(
     let db = state.db.clone();
     let user_id = claims.sub;
     let email = claims.email.clone();
+    let ip = crate::routes::client_ip(&headers);
 
     tokio::spawn(async move {
         let emit = |step: &str, lbl: &str, status: &str, msg: Option<String>| {
@@ -1094,7 +1114,11 @@ pub async fn uninstall_powerdns(
                 emit("complete", "PowerDNS uninstalled", "done", None);
                 activity::log_activity(
                     &db, user_id, &email, "service.uninstall",
-                    Some("system"), Some("powerdns"), None, None,
+                    Some("system"), Some("powerdns"), None, ip.as_deref(),
+                ).await;
+                crate::services::security_hardening::audit_log(
+                    &db, "service.uninstall", Some(&email), ip.as_deref(),
+                    Some("system"), Some("powerdns"), None, None, "warning",
                 ).await;
                 tracing::info!("Service uninstalled: PowerDNS");
             }
@@ -1160,6 +1184,7 @@ pub async fn traefik_install(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
     ServerScope(_server_id, agent): ServerScope,
+    headers: axum::http::HeaderMap,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let acme_email = body.get("acme_email").and_then(|v| v.as_str()).unwrap_or("admin@localhost");
@@ -1173,7 +1198,12 @@ pub async fn traefik_install(
     sqlx::query("INSERT INTO settings (key, value, updated_at) VALUES ('reverse_proxy', 'traefik', NOW()) ON CONFLICT (key) DO UPDATE SET value = 'traefik', updated_at = NOW()")
         .execute(&state.db).await.ok();
 
-    activity::log_activity(&state.db, claims.sub, &claims.email, "traefik.install", Some("system"), None, None, None).await;
+    let ip = crate::routes::client_ip(&headers);
+    activity::log_activity(&state.db, claims.sub, &claims.email, "traefik.install", Some("system"), None, None, ip.as_deref()).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "traefik.install", Some(&claims.email), ip.as_deref(),
+        Some("system"), None, None, None, "warning",
+    ).await;
 
     Ok(Json(result))
 }
@@ -1183,6 +1213,7 @@ pub async fn traefik_uninstall(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
     ServerScope(_server_id, agent): ServerScope,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let result = agent
         .post("/traefik/uninstall", None)
@@ -1193,7 +1224,12 @@ pub async fn traefik_uninstall(
     sqlx::query("INSERT INTO settings (key, value, updated_at) VALUES ('reverse_proxy', 'nginx', NOW()) ON CONFLICT (key) DO UPDATE SET value = 'nginx', updated_at = NOW()")
         .execute(&state.db).await.ok();
 
-    activity::log_activity(&state.db, claims.sub, &claims.email, "traefik.uninstall", Some("system"), None, None, None).await;
+    let ip = crate::routes::client_ip(&headers);
+    activity::log_activity(&state.db, claims.sub, &claims.email, "traefik.uninstall", Some("system"), None, None, ip.as_deref()).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "traefik.uninstall", Some(&claims.email), ip.as_deref(),
+        Some("system"), None, None, None, "warning",
+    ).await;
 
     Ok(Json(result))
 }

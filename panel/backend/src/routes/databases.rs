@@ -1076,6 +1076,7 @@ pub async fn reset_password(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     // Fetch current db info with ownership check (returns decrypted old password)
     let (name, engine, old_password, _port, site_server_id) =
@@ -1129,9 +1130,21 @@ pub async fn reset_password(
         .map_err(|e| internal_error("reset password", e))?;
 
     // Log activity
+    let ip = crate::routes::client_ip(&headers);
     crate::services::activity::log_activity(
         &state.db, claims.sub, &claims.email, "database.password_reset",
-        Some("database"), Some(&name), None, None,
+        Some("database"), Some(&name), None, ip.as_deref(),
+    ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "database.password_reset",
+        Some(&claims.email),
+        ip.as_deref(),
+        Some("database"),
+        Some(&name),
+        None,
+        None,
+        "warning",
     ).await;
 
     tracing::info!("Database password reset: {name}");
@@ -1256,6 +1269,7 @@ pub async fn import(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Path(id): Path<Uuid>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<ImportDbRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     require_admin(&claims.role)?;
@@ -1340,9 +1354,21 @@ pub async fn import(
         }
     };
 
+    let ip = crate::routes::client_ip(&headers);
     crate::services::activity::log_activity_on_server(
         &state.db, claims.sub, &claims.email, "database.import",
-        Some("database"), Some(&name), Some(filename), None, site_server_id,
+        Some("database"), Some(&name), Some(filename), ip.as_deref(), site_server_id,
+    ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "database.import",
+        Some(&claims.email),
+        ip.as_deref(),
+        Some("database"),
+        Some(&name),
+        Some(filename),
+        None,
+        "info",
     ).await;
 
     crate::services::extensions::fire_event(&state.db, "database.imported", serde_json::json!({

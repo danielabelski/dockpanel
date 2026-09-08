@@ -345,6 +345,7 @@ pub async fn create_domain(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
     ServerScope(server_id, agent): ServerScope,
+    headers: axum::http::HeaderMap,
     Json(body): Json<CreateDomainRequest>,
 ) -> Result<(StatusCode, Json<MailDomain>), ApiError> {
     let domain = body.domain.trim().to_lowercase();
@@ -468,10 +469,24 @@ pub async fn create_domain(
         );
     }
 
+    let ip = crate::routes::client_ip(&headers);
+
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "mail.domain.create",
         Some("mail"), Some(&domain),
-        grantee.as_ref().map(|(w,)| w.as_str()), None,
+        grantee.as_ref().map(|(w,)| w.as_str()), ip.as_deref(),
+    ).await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "mail.domain.create",
+        Some(&claims.email),
+        ip.as_deref(),
+        Some("mail"),
+        Some(&domain),
+        grantee.as_ref().map(|(w,)| w.as_str()),
+        None,
+        "warning",
     ).await;
 
     Ok((StatusCode::CREATED, Json(mail_domain)))
@@ -529,6 +544,7 @@ pub async fn delete_domain(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
     Path(id): Path<Uuid>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     // Resolved before the row is gone, because the row is the only thing that knows
     // which host to strip the domain from. Sending `/mail/domains/remove` to the
@@ -576,9 +592,23 @@ pub async fn delete_domain(
         }
     });
 
+    let ip = crate::routes::client_ip(&headers);
+
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "mail.domain.delete",
-        Some("mail"), Some(&domain), None, None,
+        Some("mail"), Some(&domain), None, ip.as_deref(),
+    ).await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "mail.domain.delete",
+        Some(&claims.email),
+        ip.as_deref(),
+        Some("mail"),
+        Some(&domain),
+        None,
+        None,
+        "warning",
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -756,6 +786,7 @@ pub async fn update_account(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Path((domain_id, account_id)): Path<(Uuid, Uuid)>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<UpdateAccountRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     // The mailbox reaches its host through the domain that owns it. This is the
@@ -852,9 +883,23 @@ pub async fn update_account(
 
     sync_mail_config(&state, server_id, &agent).await?;
 
+    let ip = crate::routes::client_ip(&headers);
+
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "mail.account.update",
-        Some("mail"), Some(&email), None, None,
+        Some("mail"), Some(&email), None, ip.as_deref(),
+    ).await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "mail.account.update",
+        Some(&claims.email),
+        ip.as_deref(),
+        Some("mail"),
+        Some(&email),
+        None,
+        None,
+        "warning",
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -865,6 +910,7 @@ pub async fn delete_account(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
     Path((domain_id, account_id)): Path<(Uuid, Uuid)>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     // Resolved before the DELETE, so the host is taken from the row while the row
     // still exists — and so a mailbox on a machine this administrator does not
@@ -880,9 +926,23 @@ pub async fn delete_account(
 
     sync_mail_config(&state, server_id, &agent).await?;
 
+    let ip = crate::routes::client_ip(&headers);
+
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "mail.account.delete",
-        Some("mail"), Some(&email), None, None,
+        Some("mail"), Some(&email), None, ip.as_deref(),
+    ).await;
+
+    crate::services::security_hardening::audit_log(
+        &state.db,
+        "mail.account.delete",
+        Some(&claims.email),
+        ip.as_deref(),
+        Some("mail"),
+        Some(&email),
+        None,
+        None,
+        "warning",
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -1709,11 +1769,16 @@ pub async fn relay_configure(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
     ServerScope(_server_id, agent): ServerScope,
+    headers: axum::http::HeaderMap,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     agent.post("/mail/relay/configure", Some(body)).await
         .map_err(|e| agent_error("SMTP relay", e))?;
-    activity::log_activity(&state.db, claims.sub, &claims.email, "mail.relay_configure", None, None, None, None).await;
+    let ip = crate::routes::client_ip(&headers);
+    activity::log_activity(&state.db, claims.sub, &claims.email, "mail.relay_configure", None, None, None, ip.as_deref()).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "mail.relay_configure", Some(&claims.email), ip.as_deref(), None, None, None, None, "warning",
+    ).await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -2201,11 +2266,16 @@ pub async fn mailbox_backup_delete(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
     ServerScope(_server_id, agent): ServerScope,
+    headers: axum::http::HeaderMap,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     agent.post("/mail/backups/delete", Some(body)).await
         .map_err(|e| agent_error("Delete backup", e))?;
-    activity::log_activity(&state.db, claims.sub, &claims.email, "mail.backup_delete", None, None, None, None).await;
+    let ip = crate::routes::client_ip(&headers);
+    activity::log_activity(&state.db, claims.sub, &claims.email, "mail.backup_delete", None, None, None, ip.as_deref()).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "mail.backup_delete", Some(&claims.email), ip.as_deref(), None, None, None, None, "warning",
+    ).await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -2227,11 +2297,16 @@ pub async fn tls_enforce(
     State(state): State<AppState>,
     AdminUser(claims): AdminUser,
     ServerScope(_server_id, agent): ServerScope,
+    headers: axum::http::HeaderMap,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     agent.post("/mail/tls/enforce", Some(body)).await
         .map_err(|e| agent_error("TLS enforce", e))?;
-    activity::log_activity(&state.db, claims.sub, &claims.email, "mail.tls_enforce", None, None, None, None).await;
+    let ip = crate::routes::client_ip(&headers);
+    activity::log_activity(&state.db, claims.sub, &claims.email, "mail.tls_enforce", None, None, None, ip.as_deref()).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "mail.tls_enforce", Some(&claims.email), ip.as_deref(), None, None, None, None, "warning",
+    ).await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
