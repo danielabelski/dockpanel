@@ -859,6 +859,7 @@ pub fn write_php_pool_config(
     php_version: &str,
     memory_mb: u32,
     max_workers: u32,
+    pool_owner: Option<(&str, &str)>,
 ) -> Result<(), String> {
     let pool_dir = format!("/etc/php/{php_version}/fpm/pool.d");
     if !std::path::Path::new(&pool_dir).exists() {
@@ -868,13 +869,20 @@ pub fn write_php_pool_config(
     // Sanitize domain for use as pool name (replace dots with underscores)
     let pool_name = domain.replace('.', "_");
 
+    // SFTP-enabled sites own their content under their own uid/gid (see
+    // `services::sftp_accounts`), so the pool that reads/writes it must run as
+    // that same identity — `www-data` would lose write access the moment the
+    // site's directory is re-chowned. `None` (every non-SFTP site, the common
+    // case) keeps the original shared identity.
+    let (user, group) = pool_owner.unwrap_or(("www-data", "www-data"));
+
     let config = format!(
         r#"[{pool_name}]
-user = www-data
-group = www-data
+user = {user}
+group = {group}
 listen = /run/php/php{php_version}-fpm-{pool_name}.sock
-listen.owner = www-data
-listen.group = www-data
+listen.owner = {user}
+listen.group = {group}
 listen.mode = 0660
 
 pm = dynamic
@@ -897,7 +905,7 @@ php_admin_value[max_execution_time] = 300
     std::fs::write(&pool_path, &config)
         .map_err(|e| format!("Failed to write FPM pool config: {e}"))?;
 
-    tracing::info!("PHP-FPM pool config written: {pool_path} (workers={max_workers}, memory={memory_mb}M)");
+    tracing::info!("PHP-FPM pool config written: {pool_path} (user={user}, workers={max_workers}, memory={memory_mb}M)");
     Ok(())
 }
 

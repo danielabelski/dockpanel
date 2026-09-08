@@ -67,6 +67,12 @@ pub struct SiteConfig {
     /// Bot protection mode: "off", "rate-limit", "challenge", "block"
     #[serde(default)]
     pub bot_protection: Option<String>,
+    /// PHP-FPM pool user (SFTP-enabled sites only — see `services::sftp_accounts`).
+    /// `None` keeps the shared `www-data` identity every other site uses.
+    #[serde(default)]
+    pub pool_user: Option<String>,
+    #[serde(default)]
+    pub pool_group: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -184,7 +190,11 @@ async fn put_site(
             if let Some(ver) = socket.strip_prefix("unix:/run/php/php").and_then(|s| s.strip_suffix("-fpm.sock")) {
                 let memory = config.php_memory_mb.unwrap_or(256);
                 let workers = config.php_max_workers.unwrap_or(5);
-                if let Err(e) = services::nginx::write_php_pool_config(&domain, ver, memory, workers) {
+                let pool_owner = match (config.pool_user.as_deref(), config.pool_group.as_deref()) {
+                    (Some(u), Some(g)) => Some((u, g)),
+                    _ => None,
+                };
+                if let Err(e) = services::nginx::write_php_pool_config(&domain, ver, memory, workers, pool_owner) {
                     tracing::warn!("Failed to write PHP pool config for {domain}: {e}");
                 } else {
                     // Reload PHP-FPM so the new per-site pool is actually picked up.

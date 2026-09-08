@@ -29,6 +29,7 @@ pub mod pkg;
 pub mod remote_backup;
 pub mod security;
 pub mod security_scanner;
+pub mod sftp_accounts;
 pub mod smtp;
 pub mod ssl;
 pub mod ssrf_guard;

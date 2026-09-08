@@ -217,6 +217,7 @@ async fn main() {
         .merge(routes::panel_update::router())
         .merge(routes::diagnostics::router())
         .merge(routes::mail::router())
+        .merge(routes::sftp::router())
         .merge(routes::migration::router())
         .merge(routes::service_installer::router())
         .merge(routes::server_utils::router())

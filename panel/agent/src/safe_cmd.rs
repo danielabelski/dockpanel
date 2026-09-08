@@ -134,6 +134,26 @@ static CAPTURE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64:
 /// Env vars passed via `extra_env` reach the inner binary as `--setenv=K=V`.
 /// The defaults (PATH, HOME, LANG, LC_ALL, DEBIAN_FRONTEND, DOCKER_CONFIG) are
 /// always set so it does not inherit PID1's wider environment.
+/// Escape a literal `$` for the inner command's argv, live-verified necessary
+/// on a fresh VPS: `systemd-run` turns the trailing argv into the transient
+/// unit's own `ExecStart=`, which systemd's unit-file grammar subjects to
+/// `$VAR`/`${VAR}` environment-variable expansion — undocumented for
+/// `systemd-run`'s own command line, but real. An argument like a SHA-crypt
+/// hash (`$6$salt$hash`) silently loses everything from the first unset `$6`
+/// onward, which does not fail loudly: the wrapped command just receives
+/// fewer/garbled arguments and reports its own generic usage error, with
+/// nothing in this codebase pointing at the real cause. systemd's own escape
+/// for a literal `$` is `$$` (confirmed empirically: `$$6$$abc$$def` round-
+/// trips to `$6$abc$def` through this exact systemd-run invocation shape).
+/// Every argument passed through [`UnsandboxedCommand::arg`]/`args` (and the
+/// sync sibling) is escaped here so no future caller has to know this.
+fn escape_dollar_for_systemd_run(a: &std::ffi::OsStr) -> std::ffi::OsString {
+    match a.to_str() {
+        Some(s) if s.contains('$') => std::ffi::OsString::from(s.replace('$', "$$")),
+        _ => a.to_os_string(),
+    }
+}
+
 pub struct UnsandboxedCommand {
     argv: Vec<std::ffi::OsString>,
 }
@@ -147,7 +167,7 @@ impl UnsandboxedCommand {
 
     /// Append one argument to the **inner** binary.
     pub fn arg<S: AsRef<std::ffi::OsStr>>(&mut self, a: S) -> &mut Self {
-        self.argv.push(a.as_ref().to_os_string());
+        self.argv.push(escape_dollar_for_systemd_run(a.as_ref()));
         self
     }
 
@@ -158,7 +178,7 @@ impl UnsandboxedCommand {
         S: AsRef<std::ffi::OsStr>,
     {
         for a in args {
-            self.argv.push(a.as_ref().to_os_string());
+            self.argv.push(escape_dollar_for_systemd_run(a.as_ref()));
         }
         self
     }
@@ -388,7 +408,7 @@ impl UnsandboxedCommandSync {
 
     /// Append one argument to the **inner** binary.
     pub fn arg<S: AsRef<std::ffi::OsStr>>(&mut self, a: S) -> &mut Self {
-        self.argv.push(a.as_ref().to_os_string());
+        self.argv.push(escape_dollar_for_systemd_run(a.as_ref()));
         self
     }
 
@@ -399,7 +419,7 @@ impl UnsandboxedCommandSync {
         S: AsRef<std::ffi::OsStr>,
     {
         for a in args {
-            self.argv.push(a.as_ref().to_os_string());
+            self.argv.push(escape_dollar_for_systemd_run(a.as_ref()));
         }
         self
     }
@@ -693,6 +713,44 @@ mod tests {
         assert!(argv.contains(&"--setenv=PGPASSWORD=s3cret".to_string()));
         let sep = argv.iter().position(|a| a == "--").expect("separator");
         assert_eq!(&argv[sep + 1..], ["apt-get", "install", "-y", "redis-server"]);
+    }
+
+    /// Live-verified on a fresh VPS: `$6$salt$hash` (a real SHA-crypt shape)
+    /// passed through this escape hatch reached the inner command as just
+    /// the text before the first `$`, everything after silently gone —
+    /// `systemd-run`'s transient-unit ExecStart= is subject to systemd's own
+    /// `$VAR`/`${VAR}` expansion, and none of `$6`/`$salt`/`$hash` are set.
+    /// `$$` is systemd's own escape for a literal `$` and round-trips
+    /// correctly through this exact invocation shape (confirmed on-box) —
+    /// this is why `arg`/`args` must double every `$` rather than merely
+    /// documenting the trap.
+    #[test]
+    fn a_dollar_sign_in_an_argument_is_escaped_for_systemd_run() {
+        let mut cmd = safe_command_unsandboxed("usermod", &[]);
+        cmd.args(["-p", "$6$abcdefgh$somehashvalue", "someuser"]);
+        let argv = argv_of(&cmd);
+        assert!(
+            argv.contains(&"$$6$$abcdefgh$$somehashvalue".to_string()),
+            "argv did not contain the doubled-dollar escaped hash: {argv:?}"
+        );
+        assert!(
+            !argv.iter().any(|a| a == "$6$abcdefgh$somehashvalue"),
+            "the raw, unescaped hash reached argv — this is exactly what silently \
+             mangles through systemd-run's own $VAR expansion"
+        );
+    }
+
+    /// An argument with no `$` at all must pass through byte-for-byte — the
+    /// escaping must be a no-op for the overwhelming majority of callers that
+    /// never touch this class of value.
+    #[test]
+    fn an_argument_with_no_dollar_sign_is_unchanged() {
+        let mut cmd = safe_command_unsandboxed("useradd", &[]);
+        cmd.args(["-u", "30001", "-d", "/var/dockpanel-sftp/example.com", "sftp30001"]);
+        assert_eq!(
+            argv_of(&cmd)[argv_of(&cmd).iter().position(|a| a == "--").unwrap() + 1..],
+            ["useradd", "-u", "30001", "-d", "/var/dockpanel-sftp/example.com", "sftp30001"]
+        );
     }
 
     /// `insert_unit_arg` must land `--unit=` immediately before the `--`

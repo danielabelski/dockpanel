@@ -142,6 +142,13 @@ pub struct Site {
     /// disable. Cleared by a manual re-enable, a quota raise/removal, or a new
     /// calendar month.
     pub bandwidth_suspended_at: Option<DateTime<Utc>>,
+    /// Opt-in per site. Enabling it is the one moment DockPanel restructures an
+    /// existing site's docroot (content moves under a writable subdirectory so
+    /// the OpenSSH chroot boundary can stay root-owned) — see
+    /// `services::sftp_accounts` on the agent.
+    pub sftp_enabled: bool,
+    pub sftp_uid: Option<i32>,
+    pub sftp_gid: Option<i32>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

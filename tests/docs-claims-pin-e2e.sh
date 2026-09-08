@@ -219,7 +219,7 @@ else
            one-hundred-twenty-five one-hundred-twenty-six one-hundred-twenty-seven
            one-hundred-twenty-eight one-hundred-twenty-nine one-hundred-thirty
            one-hundred-thirty-one one-hundred-thirty-two one-hundred-thirty-three
-           one-hundred-thirty-four"
+           one-hundred-thirty-four one-hundred-thirty-five"
     n=0; want_word=""
     for w in $words; do n=$((n+1)); [ "$n" -eq "$rows" ] && want_word="$w"; done
     if [ "$p_assert" != "$sum" ]; then

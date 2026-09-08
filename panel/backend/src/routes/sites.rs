@@ -2091,6 +2091,31 @@ pub async fn remove(
         ).await.map_err(|e| tracing::warn!("Best-effort Redis purge failed for {}: {e}", site.domain)).ok();
     }
 
+    // Tear down the SFTP account (if any) BEFORE the site directory itself is
+    // removed below — detaching the bind mount and reverting ownership on a
+    // directory that is about to be deleted anyway is redundant work, but it
+    // keeps `deprovision`'s contract simple (it always leaves the box in a
+    // fully-reverted state) rather than growing a delete-vs-disable branch.
+    if site.sftp_enabled
+        && let (Some(uid), Some(gid)) = (site.sftp_uid, site.sftp_gid)
+    {
+        let last_sftp_site: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM sites WHERE sftp_enabled = true AND id != $1",
+        )
+        .bind(id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or((1,)); // fail toward NOT removing the shared sshd drop-in
+        if let Err(e) = agent.post(
+            &format!("/sftp/sites/{}/disable", site.domain),
+            Some(serde_json::json!({
+                "uid": uid, "gid": gid, "last_sftp_site": last_sftp_site.0 == 0,
+            })),
+        ).await {
+            tracing::warn!("SFTP teardown failed for {} during site deletion — continuing: {e}", site.domain);
+        }
+    }
+
     // Remove nginx config + SSL + PHP pool + site files + logs
     let agent_path = format!("/nginx/sites/{}", site.domain);
     agent.delete(&agent_path).await
@@ -3694,6 +3719,216 @@ pub async fn purge_redis_cache(
     })))
 }
 
+/// POST /api/sites/{id}/sftp/enable — Provision a per-site SFTP account.
+///
+/// The one explicit, operator-triggered step that re-owns an existing site's
+/// content directory (see `panel/agent/src/services/sftp_accounts.rs`) — no
+/// site is ever migrated without this being clicked. `sftp_uid`/`sftp_gid`
+/// come from `sftp_id_seq`, an atomic Postgres sequence rather than a
+/// `MAX(sftp_uid)+1` read (which races under concurrent enables).
+pub async fn enable_sftp(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if crate::services::security_hardening::is_locked_down(&state.db).await {
+        return Err(err(StatusCode::SERVICE_UNAVAILABLE, "System is in lockdown mode"));
+    }
+
+    let site: Site = sqlx::query_as(SITE_FOR_CALLER_ALL.as_str())
+        .bind(id)
+        .bind(claims.sub)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| internal_error("enable sftp", e))?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "Site not found"))?;
+
+    if site.sftp_enabled {
+        return Ok(Json(serde_json::json!({
+            "ok": true,
+            "sftp_enabled": true,
+            "message": "SFTP is already enabled for this site",
+        })));
+    }
+
+    let agent = crate::helpers::agent_for_site_server(&state, site.server_id, &site.domain).await?;
+
+    let (allocated,): (i32,) = sqlx::query_as("SELECT nextval('sftp_id_seq')::int")
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| internal_error("allocate sftp uid", e))?;
+    let (uid, gid) = (allocated, allocated);
+
+    agent.post(
+        &format!("/sftp/sites/{}/enable", site.domain),
+        Some(serde_json::json!({ "uid": uid, "gid": gid })),
+    ).await.map_err(|e| agent_error("SFTP enable", e))?;
+
+    sqlx::query("UPDATE sites SET sftp_enabled = true, sftp_uid = $1, sftp_gid = $2, updated_at = NOW() WHERE id = $3")
+        .bind(uid)
+        .bind(gid)
+        .bind(id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| internal_error("enable sftp", e))?;
+
+    // Rebuild the vhost so the PHP-FPM pool picks up the new owner — mirrors
+    // the redis toggle's own "rebuild the FULL vhost" step, for the same
+    // reason (a hand-rolled partial body would drop WAF/CSP/bot-protection).
+    let mut updated_site = site.clone();
+    updated_site.sftp_enabled = true;
+    updated_site.sftp_uid = Some(uid);
+    updated_site.sftp_gid = Some(gid);
+    agent.put(
+        &format!("/nginx/sites/{}", site.domain),
+        build_nginx_body(&updated_site),
+    ).await.map_err(|e| agent_error("SFTP nginx/pool rebuild", e))?;
+
+    let ip = crate::routes::client_ip(&headers);
+    tracing::info!("SFTP enabled for {} (uid={uid})", site.domain);
+    activity::log_activity(
+        &state.db, claims.sub, &claims.email, "site.sftp.enabled",
+        Some("site"), Some(&site.domain), None, ip.as_deref(),
+    ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "site.sftp.enabled", Some(&claims.email), ip.as_deref(),
+        Some("site"), Some(&site.domain), None, None, "warning",
+    ).await;
+
+    Ok(Json(serde_json::json!({ "ok": true, "sftp_enabled": true })))
+}
+
+/// POST /api/sites/{id}/sftp/disable — Tear down a site's SFTP account and
+/// revert its content directory back to the shared `www-data` identity.
+pub async fn disable_sftp(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let site: Site = sqlx::query_as(SITE_FOR_CALLER_ALL.as_str())
+        .bind(id)
+        .bind(claims.sub)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| internal_error("disable sftp", e))?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "Site not found"))?;
+
+    if !site.sftp_enabled {
+        return Ok(Json(serde_json::json!({
+            "ok": true,
+            "sftp_enabled": false,
+            "message": "SFTP is already disabled for this site",
+        })));
+    }
+    let (uid, gid) = (
+        site.sftp_uid.ok_or_else(|| internal_error("disable sftp", sqlx::Error::RowNotFound))?,
+        site.sftp_gid.ok_or_else(|| internal_error("disable sftp", sqlx::Error::RowNotFound))?,
+    );
+
+    let agent = crate::helpers::agent_for_site_server(&state, site.server_id, &site.domain).await?;
+
+    let last_sftp_site: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM sites WHERE sftp_enabled = true AND id != $1",
+    )
+    .bind(id)
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or((1,)); // fail toward NOT removing the shared sshd drop-in
+
+    // Revert the PHP-FPM pool (and reload it) BEFORE tearing down the SFTP
+    // account — live-verified this ordering matters: `userdel` refuses to
+    // remove a uid with a running process, and the OLD pool's workers are
+    // still alive under the SFTP uid at this point. `php-fpm reload` starts
+    // fresh www-data-owned workers and gracefully stops the old ones, so by
+    // the time the agent's disable endpoint runs, nothing is running as the
+    // uid it is about to delete. The other order (userdel first) silently
+    // failed the account/group removal every time, with no error surfaced
+    // anywhere — `deprovision()`'s userdel/groupdel calls are themselves
+    // best-effort (matching every other cleanup step in that function), so
+    // the failure produced a clean "disabled" response over a half-torn-down
+    // box.
+    let mut updated_site = site.clone();
+    updated_site.sftp_enabled = false;
+    agent.put(
+        &format!("/nginx/sites/{}", site.domain),
+        build_nginx_body(&updated_site),
+    ).await.map_err(|e| agent_error("SFTP nginx/pool revert", e))?;
+
+    agent.post(
+        &format!("/sftp/sites/{}/disable", site.domain),
+        Some(serde_json::json!({ "uid": uid, "gid": gid, "last_sftp_site": last_sftp_site.0 == 0 })),
+    ).await.map_err(|e| agent_error("SFTP disable", e))?;
+
+    sqlx::query("UPDATE sites SET sftp_enabled = false, updated_at = NOW() WHERE id = $1")
+        .bind(id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| internal_error("disable sftp", e))?;
+
+    let ip = crate::routes::client_ip(&headers);
+    tracing::info!("SFTP disabled for {}", site.domain);
+    activity::log_activity(
+        &state.db, claims.sub, &claims.email, "site.sftp.disabled",
+        Some("site"), Some(&site.domain), None, ip.as_deref(),
+    ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "site.sftp.disabled", Some(&claims.email), ip.as_deref(),
+        Some("site"), Some(&site.domain), None, None, "warning",
+    ).await;
+
+    Ok(Json(serde_json::json!({ "ok": true, "sftp_enabled": false })))
+}
+
+/// POST /api/sites/{id}/sftp/reset-password — Generate a fresh SFTP password.
+///
+/// Always generates, never accepts an operator-supplied value — matching
+/// `databases.rs::reset_password`'s pattern. No column stores it: a Linux
+/// account's password can be set again with no prior knowledge, so once this
+/// response leaves the panel, the plaintext is gone from every system that
+/// isn't the operator's own clipboard.
+pub async fn reset_sftp_password(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let site: Site = sqlx::query_as(SITE_FOR_CALLER_ALL.as_str())
+        .bind(id)
+        .bind(claims.sub)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| internal_error("reset sftp password", e))?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "Site not found"))?;
+
+    if !site.sftp_enabled {
+        return Err(err(StatusCode::BAD_REQUEST, "SFTP is not enabled for this site"));
+    }
+    let uid = site.sftp_uid.ok_or_else(|| internal_error("reset sftp password", sqlx::Error::RowNotFound))?;
+
+    let agent = crate::helpers::agent_for_site_server(&state, site.server_id, &site.domain).await?;
+    let password = uuid::Uuid::new_v4().to_string();
+
+    agent.post(
+        &format!("/sftp/sites/{}/password", site.domain),
+        Some(serde_json::json!({ "uid": uid, "password": password })),
+    ).await.map_err(|e| agent_error("SFTP password reset", e))?;
+
+    let ip = crate::routes::client_ip(&headers);
+    tracing::info!("SFTP password reset for {}", site.domain);
+    activity::log_activity(
+        &state.db, claims.sub, &claims.email, "site.sftp.password_reset",
+        Some("site"), Some(&site.domain), None, ip.as_deref(),
+    ).await;
+    crate::services::security_hardening::audit_log(
+        &state.db, "site.sftp.password_reset", Some(&claims.email), ip.as_deref(),
+        Some("site"), Some(&site.domain), None, None, "warning",
+    ).await;
+
+    Ok(Json(serde_json::json!({ "ok": true, "password": password })))
+}
+
 /// PUT /api/sites/{id}/waf — Toggle WAF and set mode for a site.
 pub async fn toggle_waf(
     State(state): State<AppState>,
@@ -3924,6 +4159,19 @@ pub(crate) fn build_nginx_body(site: &crate::models::Site) -> serde_json::Value 
     }
     if site.runtime == "proxy" || site.runtime == "node" || site.runtime == "python" {
         body["proxy_port"] = serde_json::json!(site.proxy_port);
+    }
+    if site.sftp_enabled
+        && let (Some(uid), Some(gid)) = (site.sftp_uid, site.sftp_gid)
+    {
+        // Backend and agent are separate binaries — this naming convention is
+        // duplicated (not shared code) on the agent side in
+        // `services::sftp_accounts::{sftp_username, sftp_groupname}`, which is
+        // the one place that actually creates these Linux accounts. Keep the
+        // two definitions byte-for-byte identical; a drift here means the
+        // panel tells the wrong pool owner to a `write_php_pool_config` call
+        // that already succeeded under a different name.
+        body["pool_user"] = serde_json::json!(format!("sftp{uid}"));
+        body["pool_group"] = serde_json::json!(format!("sftpg{gid}"));
     }
     body
 }

@@ -159,6 +159,8 @@ fn proxy_site_config(port: u16) -> SiteConfig {
         csp_policy: None,
         permissions_policy: None,
         bot_protection: None,
+        pool_user: None,
+        pool_group: None,
     }
 }
 

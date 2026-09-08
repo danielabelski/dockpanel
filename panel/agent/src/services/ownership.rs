@@ -271,6 +271,23 @@ pub fn fail2ban_jail(path: &str, domain: &str) -> Owner {
     )
 }
 
+/// Does the allocated SFTP uid `uid` actually belong to `domain`?
+///
+/// Unlike every other resource type in this file, the marker isn't read from
+/// the resource itself (a Linux account has nowhere safe to carry one — its
+/// own home directory is inside the chroot jail the account can write to) but
+/// from a dedicated file `services::sftp_accounts::provision` writes, once,
+/// only after every provisioning step has already succeeded. A caller-passed
+/// uid alone is not proof: `sites.sftp_uid` should always be right, but this
+/// is the same fail-closed shape every other `owned_*` function here uses
+/// rather than trusting a derived or passed-in identifier on its own.
+pub fn sftp_user(uid: i32, domain: &str) -> Owner {
+    owner_by_lines(
+        &crate::services::sftp_accounts::owner_marker_path(uid),
+        &[format!("Domain={domain}")],
+    )
+}
+
 /// Does the Traefik dynamic route file at `path` route `domain`?
 ///
 /// Both the plain and the TLS router emit the same `rule:` line, so one marker

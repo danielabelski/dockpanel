@@ -4,6 +4,39 @@ All notable changes to DockPanel will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.238.0]
+
+### Per-site SFTP accounts (GH #108)
+
+The single most-requested item on the tracker. Every site's files were owned by one shared
+`www-data` Linux identity, with no way to hand a site owner filesystem access without giving them
+the whole box. Each SFTP-enabled site now gets its own Linux uid/gid — the real content directory
+is re-owned to that identity (the actual isolation), and a separate chroot jail is bind-mounted onto
+it (never moved) so OpenSSH's `ChrootDirectory` requirement — every path component root-owned and
+non-writable — never needs to touch nginx, PHP-FPM, WP-CLI, or CMS-installer paths that assume the
+site lives at its existing location.
+
+**Explicit, one-time, and reversible.** Nothing migrates until "Enable SFTP" is clicked on a site's
+own page; disabling reverts ownership to `www-data` and tears down the jail. The password is always
+panel-generated (never operator-typed), hashed in-process and set via `usermod -p`, shown to the
+operator exactly once, and never stored — a Linux account needs no prior password to reset again, so
+there is nothing for the panel to hold between resets.
+
+uid/gid allocation goes through a real Postgres sequence rather than a `MAX()+1` read, which would
+race under concurrent enables. The sshd configuration change (a dedicated `Match Group` drop-in) is
+validated (`sshd -t`) before every reload — the codebase's existing SSH-hardening code had no such
+check before this, a real lockout risk on any config mistake, now fixed for this path.
+
+New mutation-tested pin (`sftp-accounts-pin-e2e.sh`, 57 assertions), grown across four rounds of
+live-verified fixes on a throwaway VPS: an `EROFS` on jail-directory creation under the agent's
+systemd sandbox, a `$`-in-argument mangling through the shared `systemd-run` command wrapper (fixed
+at the shared primitive, not just this call site — bcrypt/Argon2/SHA-crypt all use `$` as a field
+separator), a SHA-crypt salt exceeding the format's own 16-character cap (silently unverifiable by
+`crypt()`), and PHP-FPM's master process respawning workers under a deleted uid because pool-config
+removal alone doesn't stop it — `deprovision()` now removes the pool config and reloads PHP-FPM
+itself, not relying on the caller. No new endpoints beyond the three this feature adds; no existing
+behavior changes for a site that never enables it.
+
 ## [2.237.0]
 
 ### Per-site bandwidth quota and traffic accounting (GH #84)

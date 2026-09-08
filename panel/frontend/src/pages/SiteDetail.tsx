@@ -35,6 +35,8 @@ interface Site {
   csp_policy: string | null;
   permissions_policy: string | null;
   bot_protection: string;
+  sftp_enabled: boolean;
+  sftp_uid: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -228,6 +230,17 @@ export default function SiteDetail() {
   const [redisToggling, setRedisToggling] = useState(false);
   const [redisPurging, setRedisPurging] = useState(false);
   const [redisMsg, setRedisMsg] = useState("");
+  const [sftpToggling, setSftpToggling] = useState(false);
+  const [sftpResetting, setSftpResetting] = useState(false);
+  const [sftpMsg, setSftpMsg] = useState("");
+  const [sftpPassword, setSftpPassword] = useState<string | null>(null);
+  const [copied, setCopied] = useState("");
+
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    setCopied(label);
+    setTimeout(() => setCopied(""), 2000);
+  };
 
   // WAF
   const [wafToggling, setWafToggling] = useState(false);
@@ -1698,6 +1711,126 @@ export default function SiteDetail() {
                 </span>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* SFTP Access */}
+      {site.status === "active" && (
+        <div className="bg-dark-800 rounded-lg border border-dark-500 overflow-hidden mt-6">
+          <div className="px-5 py-4 border-b border-dark-600 flex items-center justify-between">
+            <h2 className="text-xs font-medium text-dark-300 uppercase font-mono tracking-widest">SFTP Access</h2>
+            <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${
+              site.sftp_enabled ? "bg-rust-500/10 text-rust-400" : "bg-dark-700 text-dark-300"
+            }`}>
+              {site.sftp_enabled ? "Enabled" : "Disabled"}
+            </span>
+          </div>
+          <div className="p-5 space-y-4">
+            <p className="text-sm text-dark-200">
+              Gives this site its own Linux account, chrooted to its own files — nothing outside this
+              site is ever reachable over the connection. Enabling it re-owns the site's existing
+              content directory; this only happens once, when you click Enable.
+            </p>
+            {site.sftp_enabled && site.sftp_uid != null && (
+              <div className="grid grid-cols-2 gap-3 text-xs font-mono">
+                <div>
+                  <div className="text-dark-400 uppercase tracking-wide mb-1">Username</div>
+                  <div className="text-dark-100">sftp{site.sftp_uid}</div>
+                </div>
+                <div>
+                  <div className="text-dark-400 uppercase tracking-wide mb-1">Host / Port</div>
+                  <div className="text-dark-100">{site.domain} / 22</div>
+                </div>
+              </div>
+            )}
+            <div className="flex items-center gap-3">
+              <button
+                disabled={sftpToggling}
+                onClick={async () => {
+                  setSftpToggling(true);
+                  setSftpMsg("");
+                  setSftpPassword(null);
+                  try {
+                    const path = site.sftp_enabled ? "disable" : "enable";
+                    const result = await api.post<{ sftp_enabled: boolean }>(`/sites/${id}/sftp/${path}`);
+                    // sftp_uid isn't in this response — the toggle endpoints only
+                    // confirm the new state; re-fetching the site is what picks up
+                    // the allocated uid after an enable.
+                    setSite(s => s ? { ...s, sftp_enabled: result.sftp_enabled } : s);
+                    if (result.sftp_enabled) {
+                      const fresh = await api.get<Site>(`/sites/${id}`);
+                      setSite(fresh);
+                    }
+                    setSftpMsg(site.sftp_enabled ? "SFTP disabled" : "SFTP enabled");
+                  } catch (e) {
+                    setSftpMsg(e instanceof Error ? e.message : "Toggle failed");
+                  } finally {
+                    setSftpToggling(false);
+                  }
+                }}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${
+                  site.sftp_enabled
+                    ? "bg-warn-500/10 text-warn-400 hover:bg-warn-500/20"
+                    : "bg-rust-500 text-white hover:bg-rust-600"
+                }`}
+              >
+                {sftpToggling ? "..." : site.sftp_enabled ? "Disable SFTP" : "Enable SFTP"}
+              </button>
+              {site.sftp_enabled && (
+                <button
+                  disabled={sftpResetting}
+                  onClick={async () => {
+                    setSftpResetting(true);
+                    setSftpMsg("");
+                    try {
+                      const result = await api.post<{ password: string }>(`/sites/${id}/sftp/reset-password`);
+                      setSftpPassword(result.password);
+                    } catch (e) {
+                      setSftpMsg(e instanceof Error ? e.message : "Reset failed");
+                    } finally {
+                      setSftpResetting(false);
+                    }
+                  }}
+                  className="px-4 py-2 bg-dark-700 text-dark-100 rounded-lg text-sm font-medium hover:bg-dark-600 disabled:opacity-50 transition-colors"
+                >
+                  {sftpResetting ? "Resetting..." : "Reset Password"}
+                </button>
+              )}
+              {sftpMsg && (
+                <span className={`text-xs ${sftpMsg.includes("failed") || sftpMsg.includes("Failed") ? "text-danger-400" : "text-rust-400"}`}>
+                  {sftpMsg}
+                </span>
+              )}
+            </div>
+            {sftpPassword && (
+              <div className="bg-dark-900 rounded-lg border border-accent-500/30 p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-xs font-medium text-accent-400 uppercase font-mono tracking-widest">
+                    Password Reset Successful
+                  </h3>
+                  <button
+                    onClick={() => setSftpPassword(null)}
+                    className="text-dark-400 hover:text-dark-200 text-sm"
+                    aria-label="Dismiss"
+                  >
+                    &times;
+                  </button>
+                </div>
+                <p className="text-xs text-dark-300 mb-2">Save this password now — it will not be shown again after you leave this page.</p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 bg-dark-800 border border-dark-500 rounded-lg px-3 py-2 text-sm font-mono text-dark-50">
+                    {sftpPassword}
+                  </code>
+                  <button
+                    onClick={() => copyToClipboard(sftpPassword, "sftp_password")}
+                    className="shrink-0 px-3 py-2 bg-dark-700 text-dark-200 rounded-lg text-xs hover:bg-dark-600 transition-colors"
+                  >
+                    {copied === "sftp_password" ? "Copied!" : "Copy"}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

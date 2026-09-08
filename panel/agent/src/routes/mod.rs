@@ -26,6 +26,7 @@ pub mod security;
 pub mod server_utils;
 pub mod service_installer;
 pub mod services;
+pub mod sftp;
 pub mod smtp;
 pub mod staging;
 pub mod ssl;
