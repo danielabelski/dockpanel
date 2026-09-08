@@ -562,7 +562,8 @@ else
   check_spa "API binary"                               binary api
   check_spa "Agent binary"                             binary agent
   check_spa "CLI binary"                               binary cli
-  check_spa "Panel binaries, all three"                binary total
+  check_spa "MCP binary"                               binary mcp
+  check_spa "Panel binaries, all four"                 binary total
   check_spa "API RAM (RSS)"                            ram    api
   check_spa "Agent RAM (RSS)"                          ram    agent
   check_spa "Panel services RAM (agent + API)"         ram    services
@@ -583,7 +584,7 @@ fi
 
 declare -A SURFACES=(
   ["Panel services RAM (agent + API)"]="README.md COMPARISON.md docs/getting-started.md website/client/index.html"
-  ["Panel binaries, all three"]="README.md COMPARISON.md website/client/index.html"
+  ["Panel binaries, all four"]="README.md COMPARISON.md website/client/index.html"
   # s354: the two agent metrics had NO row here at all, so `docs/guides` — the
   # only surface that publishes them — could not have been checked even if it had
   # been listed. It published ~20MB/~30MB against a register reading 21/~35 for
@@ -609,6 +610,7 @@ declare -A SURFACES=(
   # because they were mapped. That is the whole mechanism.
   ["API binary"]="README.md"
   ["CLI binary"]="README.md"
+  ["MCP binary"]="README.md"
   # s378: the s377 repair of README.md:245 mapped that line's API and CLI
   # binaries and stopped there, while the SAME LINE also publishes the agent
   # binary, both RAM figures and the full-stack total. Four of the five gaps

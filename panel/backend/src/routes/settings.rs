@@ -81,6 +81,14 @@ pub const ALLOWED_KEYS: &[&str] = &[
     // AI-assisted build/deploy failure diagnosis (BYO API key, default off).
     // Read by services/ai_diagnosis.rs.
     "ai_diagnosis_enabled", "ai_diagnosis_provider", "ai_diagnosis_model", "ai_diagnosis_api_key",
+    // MCP server (dockpanel-mcp, panel/mcp). Unlike ai_diagnosis_enabled, nothing
+    // in the backend or the MCP crate reads these yet — the MCP server's actual
+    // on/off state is the systemd unit and its bind address is /etc/dockpanel/
+    // mcp.env's own LISTEN_ADDR, both set by hand on the host, outside this
+    // table entirely. These two keys are a record an operator fills in so the
+    // Settings page can show accurate status instead of nothing — not a live
+    // switch. Settings.tsx's McpServerSettings card says so explicitly.
+    "mcp_server_enabled", "mcp_bind_mode",
 ];
 
 /// Settings keys masked in the GET response and encrypted at rest, alongside

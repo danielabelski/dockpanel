@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>The most feature-packed free server panel ever built.</strong><br>
-  Self-hosted. Docker-native. Written in Rust. Panel services run on <strong>~49MB of RAM</strong>. 840 HTTP routes. 147 app templates. 4544 regression assertions. ~51MB binaries. Zero subscriptions.
+  Self-hosted. Docker-native. Written in Rust. Panel services run on <strong>~49MB of RAM</strong>. 840 HTTP routes. 147 app templates. 4544 regression assertions. ~57MB binaries. Zero subscriptions.
 </p>
 
 <p align="center">
@@ -216,6 +216,7 @@ found, including what is still broken.
 
 ### Developer Experience
 - **CLI** — `dockpanel status`, `sites`, `apps`, `diagnose`, `export`, `apply`
+- **MCP Server** — Read-only fleet introspection (~40 tools: sites, apps, databases, logs, security, monitors, alerts, and more) for AI agents over the Model Context Protocol. Opt-in, off by default, zero mutating tools. See [docs.dockpanel.dev](https://docs.dockpanel.dev).
 - **Infrastructure as Code** — Export/import server config as YAML. A Terraform/Pulumi-shaped provider API also exists for reading site/database inventory (see [FEATURES.md](FEATURES.md#withdrawn-claims) — its tokens don't yet authenticate).
 - **Smart Diagnostics** — 6 check categories with one-click fixes. Auto-optimization recommendations.
 - **File Manager** — Browse, edit, upload files from the browser.
@@ -246,7 +247,7 @@ Browser → React 19 SPA → Nginx
                            └── /*     → Frontend (static files)
 ```
 
-**3 Rust binaries**: Agent (~22MB), API (~25MB), CLI (~3.9MB). Runtime RAM: ~35MB agent + ~14MB API ≈ 49MB for the panel itself; ~109MB with the bundled PostgreSQL. 17 supervised background services.
+**4 Rust binaries**: Agent (~22MB), API (~25MB), CLI (~3.9MB), MCP server (~6.1MB, opt-in). Runtime RAM: ~35MB agent + ~14MB API ≈ 49MB for the panel itself; ~109MB with the bundled PostgreSQL. 17 supervised background services.
 
 | Component | Tech | Role |
 |-----------|------|------|

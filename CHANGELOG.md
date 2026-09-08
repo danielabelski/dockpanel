@@ -4,6 +4,33 @@ All notable changes to DockPanel will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.241.0]
+
+### Add: MCP server, session 2 — the full v1 tool catalogue, Settings UI, and a stale-copy fix
+
+Finishes what v2.240.0's scaffold started. `dockpanel-mcp` now ships the complete v1 surface the
+design called for, still entirely read-only.
+
+- **37 more tools, 40 total.** One representative list/get pair per resource family — sites, apps,
+  databases, servers, monitors, DNS, backups (metadata only, never restore), mail, incidents, alerts,
+  on-call, webhooks (config listing, never inbound receivers), users, settings (masked), resellers,
+  telemetry, WordPress, Git Deploys, stacks, and the panel's own activity feed. Every tool is a thin
+  GET proxy onto the existing REST API against the actual route/query-param signatures, not guessed —
+  zero new response shapes. Verified with a live protocol handshake (`initialize` → `tools/list` →
+  `tools/call`): exactly 40 tools enumerate, and `isError: true` fires correctly on both a no-arg and
+  a param-taking tool's "not configured" path.
+- **`mcp_server_enabled` / `mcp_bind_mode` settings**, a Settings → Services card (status, bind mode,
+  resolved endpoint, inline setup steps), and honest about what they are: a record for the panel to
+  display, not a live switch — the actual on/off state is still the systemd unit. Read back by
+  `GET /api/dashboard/fleet` (and so by the `get_fleet_dashboard` tool itself) so an agent asking
+  about its own fleet gets a real answer instead of nothing.
+- **Fixed a stale, actively-misleading banner**: the API Keys card said "API keys do not yet
+  authenticate requests" on every new/rotated key — untrue since `dp_` keys became first-class, and
+  actively wrong advice to anyone minting one for MCP.
+- **Docs**: a new MCP Server guide (setup, bind modes, the full tool table, security notes), and the
+  "3 Rust binaries" claim on README/COMPARISON/dockpanel.dev corrected to 4 (~57 MB total) — stale
+  since v2.240.0 shipped the crate itself.
+
 ## [2.240.0]
 
 ### Add: MCP server, session 1 — crate scaffold + audit-attribution fix (read-only tools land in the next release)

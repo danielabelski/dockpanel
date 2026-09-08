@@ -472,7 +472,7 @@ export default function Landing() {
                 the same preference itself and renders the final value. */}
             <dl className="lg:col-span-5 mono text-sm border-t border-[#1e1e22]">
               {[
-                ['panel binary', m.binary.api, 'MB', `static; +${m.binary.agent} MB agent, +${m.binary.cli} MB CLI`],
+                ['panel binary', m.binary.api, 'MB', `static; +${m.binary.agent} MB agent, +${m.binary.cli} MB CLI, +${m.binary.mcp} MB MCP server`],
                 ['memory, both services', m.ram.services, 'MB', 'api + agent, cgroup accounting'],
                 ['install to login', m.installSeconds, 's', 'Ubuntu 24.04, 1 vCPU'],
                 ['runtime deps', 0, '', 'no Node, no Python, no PHP'],

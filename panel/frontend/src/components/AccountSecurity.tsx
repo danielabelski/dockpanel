@@ -780,7 +780,7 @@ export function ApiKeysCard() {
       )}
       {newResult && (
         <div className="px-5 py-3 border-b border-dark-600 bg-rust-500/5">
-          <p className="text-xs text-rust-400 mb-1">Copy this key now — it won't be shown again. Note: API keys do not yet authenticate requests; use your session or a JWT.</p>
+          <p className="text-xs text-rust-400 mb-1">Copy this key now — it won't be shown again. This key authenticates API requests (used by the CLI, the MCP server, and any script calling the REST API directly) with the same access as your account — treat it like a password.</p>
           <div className="flex gap-2">
             <code className="flex-1 px-2 py-1 bg-dark-900 rounded text-xs font-mono text-dark-100 break-all">{newResult}</code>
             <button onClick={() => { navigator.clipboard.writeText(newResult); setNewResult(null); }} className="px-2 py-1 bg-dark-700 rounded text-xs text-dark-200 shrink-0">Copy</button>

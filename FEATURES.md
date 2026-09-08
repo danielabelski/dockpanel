@@ -1,6 +1,6 @@
 # DockPanel Feature Manifest
 
-> **Version**: v2.240.0 | **Total**: 60+ major features, ~285 capabilities
+> **Version**: v2.241.0 | **Total**: 60+ major features, ~285 capabilities
 >
 > This file is the single source of truth for what DockPanel offers.
 > Update it whenever features are added, changed, or removed.
@@ -234,7 +234,8 @@ honest:
 | API binary | 25 MB | release | v2.236.0 |
 | Agent binary | 22 MB | release | v2.239.0 |
 | CLI binary | 3.9 MB | release | v2.222.0 |
-| Panel binaries, all three | 51 MB | release | v2.236.0 |
+| MCP binary | 6.1 MB | release | v2.240.0 |
+| Panel binaries, all four | 57 MB | release | v2.240.0 |
 | API RAM (RSS) | ~14 MB | measured | 2026-07-27 |
 | Agent RAM (RSS) | ~35 MB | measured | 2026-07-27 |
 | Panel services RAM (agent + API) | ~49 MB | measured | 2026-07-27 |

@@ -658,6 +658,25 @@ pub async fn fleet_overview(
     .await
     .unwrap_or((0,));
 
+    // MCP server status — mcp_server_enabled/mcp_bind_mode are records an
+    // operator fills in from Settings → Services (dockpanel-mcp itself doesn't
+    // read this table; its actual on/off state is the systemd unit). Surfacing
+    // them here, rather than nowhere, means the same fleet-wide view an
+    // operator gets from the panel is also what an agent gets by calling this
+    // endpoint's own MCP tool (`get_fleet_dashboard`) to check on itself.
+    let mcp_settings: Vec<(String, String)> = sqlx::query_as(
+        "SELECT key, value FROM settings WHERE key IN ('mcp_server_enabled', 'mcp_bind_mode')",
+    )
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+    let mcp_enabled = mcp_settings.iter().any(|(k, v)| k == "mcp_server_enabled" && v == "true");
+    let mcp_bind_mode = mcp_settings
+        .iter()
+        .find(|(k, _)| k == "mcp_bind_mode")
+        .map(|(_, v)| v.clone())
+        .unwrap_or_else(|| "loopback".to_string());
+
     let mut total_firing: i64 = 0;
     let mut total_sites: i64 = 0;
     let fleet: Vec<serde_json::Value> = rows.iter().map(|r| {
@@ -684,5 +703,6 @@ pub async fn fleet_overview(
         "total_firing": total_firing,
         "total_incidents": active_incidents.0,
         "total_sites": total_sites,
+        "mcp": { "enabled": mcp_enabled, "bind_mode": mcp_bind_mode },
     })))
 }
