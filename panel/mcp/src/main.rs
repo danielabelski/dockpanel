@@ -1,3 +1,4 @@
+mod auth;
 mod backend_client;
 mod tools;
 
@@ -31,14 +32,31 @@ async fn main() {
 
     let addr = listen_addr();
 
-    let config = StreamableHttpServerConfig::default();
+    // rmcp's own DNS-rebinding guard (`allowed_hosts`) defaults to loopback
+    // names only — correct for a locally-run dev server a malicious webpage
+    // might blind-request, wrong for this one: nginx forwards the real Host
+    // header for every `/mcp` request, so the default rejects 100% of real
+    // traffic with "Forbidden: Host header is not allowed" (caught live,
+    // going through nginx — a direct loopback curl never exercises it, which
+    // is how this shipped once already undetected). Emptying the list
+    // disables that check per the library's own documented behavior; it's
+    // redundant anyway now that `auth::require_bearer_token` below is the
+    // real gate — an attacker who can't produce the token can't do anything
+    // regardless of which Host header they send.
+    let config = StreamableHttpServerConfig::default().disable_allowed_hosts();
     let service = StreamableHttpService::new(
         || Ok(tools::DockPanelMcp),
         LocalSessionManager::default().into(),
         config,
     );
 
-    let router = axum::Router::new().nest_service("/mcp", service);
+    // Without this, `/mcp` has no caller authentication at all — every tool
+    // call in tools.rs authenticates its OWN outbound request to the panel
+    // API from a fixed file, never the inbound one, so anyone who could reach
+    // this endpoint got the operator's own admin-scoped access for free.
+    let router = axum::Router::new()
+        .nest_service("/mcp", service)
+        .layer(axum::middleware::from_fn(auth::require_bearer_token));
 
     let listener = match tokio::net::TcpListener::bind(&addr).await {
         Ok(l) => l,
