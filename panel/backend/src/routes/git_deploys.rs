@@ -1590,6 +1590,79 @@ pub async fn history(
     Ok(Json(entries))
 }
 
+/// POST /api/git-deploys/{id}/history/{history_id}/explain — BYO-API-key AI
+/// root-cause diagnosis for one failed deploy history entry. Off by default
+/// and per-request: this never fires on its own, only when an operator with a
+/// configured provider clicks the button (`ai_diagnosis::load_config` reads
+/// `ai_diagnosis_enabled`/`_provider`/`_model`/`_api_key` from `settings`).
+pub async fn explain_history(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path((id, history_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    require_admin(&claims.role)?;
+
+    let deploy: (Uuid, String) = sqlx::query_as(
+        "SELECT id, name FROM git_deploys WHERE id = $1 AND user_id = $2",
+    )
+    .bind(id)
+    .bind(claims.sub)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| internal_error("explain_history: load deploy", e))?
+    .ok_or_else(|| err(StatusCode::NOT_FOUND, "Git deploy not found"))?;
+
+    let entry: GitDeployHistory = sqlx::query_as(
+        "SELECT * FROM git_deploy_history WHERE id = $1 AND git_deploy_id = $2",
+    )
+    .bind(history_id)
+    .bind(id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| internal_error("explain_history: load history entry", e))?
+    .ok_or_else(|| err(StatusCode::NOT_FOUND, "Deploy history entry not found"))?;
+
+    if entry.status != "failed" {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "Only failed deploys can be explained",
+        ));
+    }
+    let output = entry
+        .output
+        .filter(|o| !o.trim().is_empty())
+        .ok_or_else(|| err(StatusCode::BAD_REQUEST, "This deploy has no captured output to diagnose"))?;
+
+    let config = crate::services::ai_diagnosis::load_config(&state.db, &state.config.jwt_secret)
+        .await?
+        .ok_or_else(|| {
+            err(
+                StatusCode::BAD_REQUEST,
+                "AI diagnosis is not configured. Set a provider and API key in Settings → Services.",
+            )
+        })?;
+
+    let ctx = crate::services::ai_diagnosis::FailureContext {
+        site_name: deploy.1,
+        commit_hash: entry.commit_hash,
+        commit_message: entry.commit_message.unwrap_or_default(),
+        image_tag: entry.image_tag,
+        output,
+    };
+    let explanation = crate::services::ai_diagnosis::explain_failure(&config, &ctx).await?;
+
+    activity::log_activity(
+        &state.db, claims.sub, &claims.email, "git_deploy.ai_explain",
+        Some("git_deploy"), Some(&ctx.site_name),
+        Some(&format!("history={history_id} provider={}", config.provider)), None,
+    ).await;
+
+    Ok(Json(serde_json::json!({
+        "explanation": explanation,
+        "provider": config.provider,
+    })))
+}
+
 /// POST /api/git-deploys/{id}/rollback/{history_id} — Rollback to a previous image.
 pub async fn rollback(
     State(state): State<AppState>,

@@ -78,6 +78,9 @@ pub const ALLOWED_KEYS: &[&str] = &[
     "retention_activity_days", "retention_system_log_days", "retention_alert_days",
     "retention_scan_days", "retention_webhook_days", "retention_notification_days",
     "retention_monitor_days",
+    // AI-assisted build/deploy failure diagnosis (BYO API key, default off).
+    // Read by services/ai_diagnosis.rs.
+    "ai_diagnosis_enabled", "ai_diagnosis_provider", "ai_diagnosis_model", "ai_diagnosis_api_key",
 ];
 
 /// Settings keys masked in the GET response and encrypted at rest, alongside
@@ -87,7 +90,22 @@ pub const ALLOWED_KEYS: &[&str] = &[
 /// `services::credential_reencrypt`'s own header warns about. `pub(crate)` so
 /// that module can also assert its `SENSITIVE_SETTINGS_SQL` predicate covers
 /// every key here, rather than hand-duplicating this list a third time.
-pub(crate) const SENSITIVE_KEYS: &[&str] = &["smtp_password", "pdns_api_key"];
+// AI diagnosis's BYO API key joins the encrypted-at-rest set alongside
+// smtp_password/pdns_api_key — `credential_reencrypt`'s own
+// `sensitive_settings_sql_covers_settings_keys` test fails to compile a
+// passing case until `SENSITIVE_SETTINGS_SQL` there names it too.
+pub(crate) const SENSITIVE_KEYS: &[&str] = &["smtp_password", "pdns_api_key", "ai_diagnosis_api_key"];
+
+/// Whether a settings key should be masked in the GET response / encrypted at
+/// rest — `SENSITIVE_KEYS` plus every `_client_secret` key. Previously
+/// `list()` hand-duplicated this as five hardcoded key-name comparisons, a
+/// second copy of the same list `update`'s encryption check already
+/// maintained via this predicate — so a key added to `SENSITIVE_KEYS` alone
+/// (as `ai_diagnosis_api_key` was) would encrypt correctly on write but come
+/// back as raw ciphertext, not `********`, on read.
+fn is_sensitive_key(key: &str) -> bool {
+    SENSITIVE_KEYS.contains(&key) || key.ends_with("_client_secret")
+}
 
 /// GET /api/settings — Returns all settings as a key/value map (admin only).
 pub async fn list(
@@ -103,10 +121,7 @@ pub async fn list(
     let map: HashMap<String, String> = rows
         .into_iter()
         .map(|r| {
-            if (r.key == "smtp_password" || r.key == "pdns_api_key"
-                || r.key == "oauth_google_client_secret"
-                || r.key == "oauth_github_client_secret"
-                || r.key == "oauth_gitlab_client_secret") && !r.value.is_empty() {
+            if is_sensitive_key(&r.key) && !r.value.is_empty() {
                 (r.key, "********".to_string())
             } else {
                 (r.key, r.value)
@@ -213,18 +228,15 @@ pub async fn update(
         .map_err(|e| internal_error("update settings", e))?;
 
     // Sensitive keys that are masked in the GET response — skip if value is the mask sentinel.
-    // `SENSITIVE_KEYS` is the module-level const above, not a local copy.
+    // `is_sensitive_key` is the module-level predicate above, not a local copy.
     for (key, value) in &body {
         // Don't overwrite real secrets with the mask placeholder
-        if SENSITIVE_KEYS.contains(&key.as_str()) && value == "********" {
-            continue;
-        }
-        if key.ends_with("_client_secret") && value == "********" {
+        if is_sensitive_key(key) && value == "********" {
             continue;
         }
 
         // Encrypt sensitive values before storing
-        let store_value = if SENSITIVE_KEYS.contains(&key.as_str()) || key.ends_with("_client_secret") {
+        let store_value = if is_sensitive_key(key) {
             if value.is_empty() {
                 value.clone()
             } else {
@@ -818,8 +830,8 @@ pub async fn import_config(
             continue; // Skip disallowed keys
         }
         if let Some(val) = value.as_str() {
-            // Encrypt sensitive values before storing (same logic as update())
-            let store_value = if SENSITIVE_KEYS.contains(&key.as_str()) || key.ends_with("_client_secret") {
+            // Encrypt sensitive values before storing (same predicate as update())
+            let store_value = if is_sensitive_key(key) {
                 if val.is_empty() {
                     val.to_string()
                 } else {

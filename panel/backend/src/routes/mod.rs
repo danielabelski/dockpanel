@@ -1259,6 +1259,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/git-deploys/{id}/deploy", post(git_deploys::deploy))
         .route("/api/git-deploys/{id}/rollback/{history_id}", post(git_deploys::rollback))
         .route("/api/git-deploys/{id}/history", get(git_deploys::history))
+        .route("/api/git-deploys/{id}/history/{history_id}/explain", post(git_deploys::explain_history))
         .route("/api/git-deploys/{id}/keygen", post(git_deploys::keygen))
         .route("/api/git-deploys/{id}/stop", post(git_deploys::stop))
         .route("/api/git-deploys/{id}/start", post(git_deploys::start))

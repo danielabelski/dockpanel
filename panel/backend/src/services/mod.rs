@@ -1,5 +1,6 @@
 pub mod activity;
 pub mod agent;
+pub mod ai_diagnosis;
 pub mod alert_engine;
 pub mod alert_runbook_defaults;
 pub mod alert_runbooks;

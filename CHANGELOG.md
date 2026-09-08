@@ -4,6 +4,37 @@ All notable changes to DockPanel will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.236.0]
+
+### AI-assisted build/deploy failure diagnosis (BYO API key)
+
+Git Deploys' history panel gets a one-click "Explain with AI" button on any failed deploy, sitting
+alongside the existing Rollback control. It sends the deploy's captured output — commit, image tag,
+and build/deploy log — to a provider the operator has configured and asks for a plain-language root
+cause and a concrete next fix.
+
+Off by default, and per-request only: nothing calls a provider on a schedule or on every failure
+automatically. Four providers are supported (Anthropic, OpenAI, Gemini, Grok/xAI), each with its own
+BYO API key, model name, and request/response handling — verified live against all four providers'
+real endpoints (with a deliberately invalid key) during development, which caught a real shape
+mismatch: xAI's error responses are `{"error": "<string>"}`, not the nested `{"error": {"message":
+...}}` object every other provider (and xAI's own success responses) use, and the fallback that
+handles it now has its own unit tests alongside the four providers' request builders.
+
+The failure output leaves the box only after unconditional redaction — passwords, tokens, API keys,
+`Authorization: Bearer` headers, connection-string credentials, and PEM private key blocks are
+stripped before the request is built, with no setting that can turn redaction off — and is capped to
+the last ~8000 characters. The API key is stored encrypted at rest through the same mechanism as
+every other integration credential in this codebase (PowerDNS, CDN tokens), not a new one invented
+for this feature; a pre-existing latent bug this change would otherwise have hit — `GET /api/settings`
+masked sensitive values via a hand-copied list of five exact key names instead of the shared
+`SENSITIVE_KEYS` predicate `update()` already used — is fixed as part of adding the new key, so a
+future sensitive key added the same way won't round-trip as raw ciphertext.
+
+New mutation-tested pin (`ai-diagnosis-pin-e2e.sh`, 29 assertions) pins the default-off gate, the
+manual-trigger-only invariant (exactly one call site, exactly one route), the failed-status gate, and
+unconditional redaction.
+
 ## [2.235.0]
 
 ### Immutable audit trail extended to destructive and privilege-sensitive mutations

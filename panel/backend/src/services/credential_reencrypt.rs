@@ -139,7 +139,7 @@ pub fn swept_subjects() -> Vec<String> {
 /// in this file's own test module asserts the two haven't drifted instead.
 const SENSITIVE_SETTINGS_SQL: &str =
     "SELECT key::text AS id, value FROM settings \
-     WHERE (key IN ('smtp_password', 'pdns_api_key') OR key LIKE '%\\_client\\_secret') \
+     WHERE (key IN ('smtp_password', 'pdns_api_key', 'ai_diagnosis_api_key') OR key LIKE '%\\_client\\_secret') \
        AND value IS NOT NULL AND value <> ''";
 
 #[derive(Debug, serde::Serialize)]

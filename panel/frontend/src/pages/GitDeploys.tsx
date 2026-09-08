@@ -142,6 +142,7 @@ export default function GitDeploys() {
   const [generatingKey, setGeneratingKey] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
   const [expandedLog, setExpandedLog] = useState<string | null>(null);
+  const [aiExplain, setAiExplain] = useState<Record<string, { loading: boolean; text?: string; error?: string; provider?: string }>>({});
   const [showDeployKey, setShowDeployKey] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [showEnvPaste, setShowEnvPaste] = useState(false);
@@ -455,6 +456,25 @@ export default function GitDeploys() {
       }
     } catch (err) {
       setMessage({ text: err instanceof Error ? err.message : "Rollback failed", type: "error" });
+    }
+  };
+
+  const explainWithAi = async (historyId: string) => {
+    if (!selected) return;
+    setAiExplain((prev) => ({ ...prev, [historyId]: { loading: true } }));
+    try {
+      const result = await api.post<{ explanation: string; provider: string }>(
+        `/git-deploys/${selected.id}/history/${historyId}/explain`,
+      );
+      setAiExplain((prev) => ({
+        ...prev,
+        [historyId]: { loading: false, text: result.explanation, provider: result.provider },
+      }));
+    } catch (e) {
+      setAiExplain((prev) => ({
+        ...prev,
+        [historyId]: { loading: false, error: e instanceof Error ? e.message : "Failed to get AI explanation" },
+      }));
     }
   };
 
@@ -1028,16 +1048,44 @@ export default function GitDeploys() {
                             Rollback
                           </button>
                         )}
+                        {entry.status === "failed" && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setExpandedLog(entry.id); explainWithAi(entry.id); }}
+                            disabled={aiExplain[entry.id]?.loading}
+                            className="px-2 py-0.5 bg-accent-500/10 text-accent-400 rounded text-xs font-medium hover:bg-accent-500/20 transition-colors disabled:opacity-50"
+                          >
+                            {aiExplain[entry.id]?.loading ? "Explaining..." : "Explain with AI"}
+                          </button>
+                        )}
                         <svg className={`w-4 h-4 text-dark-300 transition-transform ${expandedLog === entry.id ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
                         </svg>
                       </div>
                     </button>
                     {expandedLog === entry.id && entry.output && (
-                      <div className="px-5 pb-4">
+                      <div className="px-5 pb-4 space-y-3">
                         <pre className="bg-dark-900 text-dark-100 rounded-lg p-4 text-xs font-mono overflow-x-auto max-h-64 overflow-y-auto whitespace-pre-wrap border border-dark-500">
                           {entry.output}
                         </pre>
+                        {aiExplain[entry.id] && (
+                          <div className="bg-accent-500/5 border border-accent-500/20 rounded-lg p-4">
+                            <div className="flex items-center gap-2 mb-1.5">
+                              <span className="text-[10px] font-medium text-accent-400 uppercase tracking-widest">AI Diagnosis</span>
+                              {aiExplain[entry.id].provider && (
+                                <span className="text-[10px] text-dark-300">via {aiExplain[entry.id].provider}</span>
+                              )}
+                            </div>
+                            {aiExplain[entry.id].loading && (
+                              <p className="text-xs text-dark-200">Asking the configured provider...</p>
+                            )}
+                            {aiExplain[entry.id].error && (
+                              <p className="text-xs text-danger-400">{aiExplain[entry.id].error}</p>
+                            )}
+                            {aiExplain[entry.id].text && (
+                              <p className="text-xs text-dark-100 whitespace-pre-wrap">{aiExplain[entry.id].text}</p>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
