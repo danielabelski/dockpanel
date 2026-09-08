@@ -657,7 +657,34 @@ if [ "$INSTALL_FROM_RELEASE" = "1" ]; then
         fi
     done
 else
-    FE_DIST="${REPO_DIR}/panel/frontend/dist"
+    # The build above lands in $REPO_DIR/panel/frontend/dist, but nginx's
+    # `root` may point somewhere else entirely — every box that started life
+    # via the standard curl|bash install.sh serves from
+    # /opt/dockpanel/frontend/dist (the release-tarball layout, written by the
+    # branch above), which this branch's own build output never touches. Left
+    # alone, a source build logs "Frontend rebuilt" and changes nothing an
+    # operator can see: the exact stale-panel-that-looks-healthy failure this
+    # box's own nginx config already warns about (see the /assets/ location
+    # comment in setup.sh's heredoc), reached through a second door — found by
+    # actually loading the panel after a source-build upgrade, not by reading
+    # the script. Detect the ACTUAL served root rather than assume one, and
+    # sync the fresh build there; fall back to the build directory itself only
+    # when no vhost exists yet to read (first-ever setup.sh run).
+    BUILT_DIST="${REPO_DIR}/panel/frontend/dist"
+    FE_DIST="$BUILT_DIST"
+    for conf in /etc/nginx/sites-enabled/dockpanel-panel.conf /etc/nginx/conf.d/dockpanel-panel.conf; do
+        if [ -f "$conf" ]; then
+            SERVED_ROOT=$(grep -oP '^\s*root\s+\K[^;]+' "$conf" | head -1)
+            if [ -n "$SERVED_ROOT" ] && [ "$SERVED_ROOT" != "$BUILT_DIST" ] && [ -d "$BUILT_DIST" ]; then
+                mkdir -p "$SERVED_ROOT"
+                rsync -a --delete "$BUILT_DIST/" "$SERVED_ROOT/" 2>/dev/null \
+                    || cp -r "$BUILT_DIST/." "$SERVED_ROOT/"
+                log "Synced built frontend to the served root ($SERVED_ROOT)"
+                FE_DIST="$SERVED_ROOT"
+            fi
+            break
+        fi
+    done
 fi
 
 # ── Drop install-agent.sh into FE_ROOT (#56, v2.8.14) ─────────────────────
