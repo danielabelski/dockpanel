@@ -68,12 +68,12 @@ pub async fn create_token(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "iac.token_created",
-        Some("iac_token"), Some(name), None, ip.as_deref(),
+        Some("iac_token"), Some(name), None, ip.as_deref(), claims.key_id,
     ).await;
 
     crate::services::security_hardening::audit_log(
         &state.db, "iac.token_created", Some(&claims.email), ip.as_deref(),
-        Some("iac_token"), Some(name), None, None, "warning",
+        Some("iac_token"), Some(name), None, None, "warning", claims.key_id,
     ).await;
 
     // Return the raw token ONCE — it cannot be retrieved after this
@@ -265,7 +265,7 @@ pub async fn create_autoscale(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "autoscale.rule_created",
-        Some("container"), Some(name), None, None,
+        Some("container"), Some(name), None, None, claims.key_id,
     ).await;
 
     Ok((StatusCode::CREATED, Json(serde_json::json!({ "ok": true, "id": id.0 }))))

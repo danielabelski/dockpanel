@@ -500,7 +500,7 @@ pub async fn test_email(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "smtp.test",
-        Some("settings"), None, Some(&to), None,
+        Some("settings"), None, Some(&to), None, claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({
@@ -1069,12 +1069,12 @@ pub async fn import_config(
 
     crate::services::activity::log_activity(
         &state.db, claims.sub, &claims.email, "settings.import",
-        Some("settings"), None, None, ip.as_deref(),
+        Some("settings"), None, None, ip.as_deref(), claims.key_id,
     ).await;
 
     crate::services::security_hardening::audit_log(
         &state.db, "settings.import", Some(&claims.email), ip.as_deref(),
-        Some("settings"), None, None, None, "warning",
+        Some("settings"), None, None, None, "warning", claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({
@@ -1239,6 +1239,7 @@ pub async fn reencrypt_credentials(
             "examined {examined}, rewritten {rewritten}, unreadable {unreadable}, raced {raced}"
         )),
         ip.as_deref(),
+        claims.key_id,
     )
     .await;
 
@@ -1254,6 +1255,7 @@ pub async fn reencrypt_credentials(
         )),
         None,
         "warning",
+        claims.key_id,
     )
     .await;
 

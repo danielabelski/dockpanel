@@ -237,11 +237,11 @@ pub async fn login(
                 // Log failed login attempt (never log password)
                 activity::log_activity(
                     &state.db, u.id, &u.email, "auth.login_failed",
-                    None, None, None, Some(&ip),
+                    None, None, None, Some(&ip), None,
                 ).await;
                 crate::services::security_hardening::audit_log(
                     &state.db, "auth.login_failed", Some(&u.email), Some(&ip),
-                    None, None, None, None, "warning",
+                    None, None, None, None, "warning", None,
                 ).await;
                 return Err(err(StatusCode::UNAUTHORIZED, "Invalid credentials"));
             }
@@ -270,7 +270,7 @@ pub async fn login(
             ).await;
             crate::services::security_hardening::audit_log(
                 &state.db, "auth.login_failed", Some(&body.email), Some(&ip),
-                None, None, Some("unknown_user"), None, "warning",
+                None, None, Some("unknown_user"), None, "warning", None,
             ).await;
             return Err(err(StatusCode::UNAUTHORIZED, "Invalid credentials"));
         }
@@ -374,7 +374,7 @@ pub async fn login(
                 // During lockdown, log but don't block admin logins
                 security_hardening::audit_log(
                     &pool, "login.during_lockdown", Some(&email_clone), Some(&ip_clone),
-                    None, None, None, None, "warning",
+                    None, None, None, None, "warning", None,
                 ).await;
             }
 
@@ -383,7 +383,7 @@ pub async fn login(
             // Write immutable audit log
             security_hardening::audit_log(
                 &pool, "login", Some(&email_clone), Some(&ip_clone),
-                Some("user"), None, None, geo.as_ref(), "info",
+                Some("user"), None, None, geo.as_ref(), "info", None,
             ).await;
 
             // Check if this IP is new for this user
@@ -545,6 +545,7 @@ pub fn issue_session_pub(
         iat: now.timestamp() as usize,
         exp: (now + chrono::Duration::hours(2)).timestamp() as usize,
         jti: Some(jti.clone()),
+        key_id: None,
     };
 
     let token = encode(
@@ -790,7 +791,7 @@ pub async fn register(
 
     activity::log_activity(
         &state.db, user.id, &user.email, "auth.register",
-        None, None, None, Some(&ip),
+        None, None, None, Some(&ip), None,
     ).await;
 
     // Feature 1/7: Geo-IP alert and immutable audit log on registration
@@ -804,7 +805,7 @@ pub async fn register(
             // Immutable audit log
             security_hardening::audit_log(
                 &pool, "register", Some(&email_clone), Some(&ip_clone),
-                Some("user"), None, None, geo.as_ref(), "info",
+                Some("user"), None, None, geo.as_ref(), "info", None,
             ).await;
 
             // Alert admins about new registration (especially from proxy/datacenter IPs)
@@ -1064,11 +1065,11 @@ pub async fn reset_password(
 
     activity::log_activity(
         &state.db, user.id, &user.email, "auth.password_reset",
-        None, None, None, None,
+        None, None, None, None, None,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, "auth.password_reset", Some(&user.email), None,
-        None, None, None, None, "warning",
+        None, None, None, None, "warning", None,
     ).await;
 
     // Panel notification
@@ -1469,11 +1470,11 @@ pub async fn twofa_enable(
     let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "auth.2fa_enabled",
-        None, None, None, ip.as_deref(),
+        None, None, None, ip.as_deref(), claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, "auth.2fa_enabled", Some(&claims.email), ip.as_deref(),
-        None, None, None, None, "warning",
+        None, None, None, None, "warning", claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({
@@ -1726,11 +1727,11 @@ pub async fn twofa_disable(
     let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "auth.2fa_disabled",
-        None, None, None, ip.as_deref(),
+        None, None, None, ip.as_deref(), claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, "auth.2fa_disabled", Some(&claims.email), ip.as_deref(),
-        None, None, None, None, "warning",
+        None, None, None, None, "warning", claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true, "message": "2FA has been disabled" })))
@@ -1820,11 +1821,11 @@ pub async fn twofa_regenerate_recovery_codes(
     let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "auth.2fa_recovery_codes_regenerated",
-        None, None, None, ip.as_deref(),
+        None, None, None, ip.as_deref(), claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, "auth.2fa_recovery_codes_regenerated", Some(&claims.email), ip.as_deref(),
-        None, None, None, None, "warning",
+        None, None, None, None, "warning", claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({
@@ -1964,11 +1965,11 @@ pub async fn change_password(
     let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "auth.password_change",
-        None, None, None, ip.as_deref(),
+        None, None, None, ip.as_deref(), claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, "auth.password_change", Some(&claims.email), ip.as_deref(),
-        None, None, None, None, "warning",
+        None, None, None, None, "warning", claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true, "message": "Password changed successfully" })))
@@ -2001,11 +2002,11 @@ pub async fn revoke_all_sessions(
     let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "auth.revoke_all",
-        None, None, None, ip.as_deref(),
+        None, None, None, ip.as_deref(), claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, "auth.revoke_all", Some(&claims.email), ip.as_deref(),
-        None, None, None, None, "warning",
+        None, None, None, None, "warning", claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true, "message": "All sessions revoked. Users will need to re-login." })))

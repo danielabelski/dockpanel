@@ -201,7 +201,7 @@ pub async fn create_zone(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "cdn.create",
-        Some("cdn"), Some(&zone.domain), Some(provider), None,
+        Some("cdn"), Some(&zone.domain), Some(provider), None, claims.key_id,
     ).await;
 
     Ok((StatusCode::CREATED, Json(CdnZoneView::from(zone))))
@@ -237,7 +237,7 @@ pub async fn update_zone(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "cdn.update",
-        Some("cdn"), Some(&zone.domain), None, None,
+        Some("cdn"), Some(&zone.domain), None, None, claims.key_id,
     ).await;
 
     Ok(Json(CdnZoneView::from(updated)))
@@ -262,12 +262,12 @@ pub async fn delete_zone(
     let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "cdn.delete",
-        Some("cdn"), Some(&zone.domain), None, ip.as_deref(),
+        Some("cdn"), Some(&zone.domain), None, ip.as_deref(), claims.key_id,
     ).await;
 
     crate::services::security_hardening::audit_log(
         &state.db, "cdn.delete", Some(&claims.email), ip.as_deref(),
-        Some("cdn"), Some(&zone.domain), None, None, "warning",
+        Some("cdn"), Some(&zone.domain), None, None, "warning", claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -365,7 +365,7 @@ pub async fn purge_cache(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "cdn.purge",
-        Some("cdn"), Some(&zone.domain), Some(&zone.provider), None,
+        Some("cdn"), Some(&zone.domain), Some(&zone.provider), None, claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true, "message": "Cache purged successfully" })))

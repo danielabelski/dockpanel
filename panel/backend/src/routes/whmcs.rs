@@ -164,12 +164,12 @@ pub async fn update_config(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "whmcs.configured",
-        Some("settings"), None, None, ip.as_deref(),
+        Some("settings"), None, None, ip.as_deref(), claims.key_id,
     ).await;
 
     crate::services::security_hardening::audit_log(
         &state.db, "whmcs.configured", Some(&claims.email), ip.as_deref(),
-        Some("settings"), None, None, None, "warning",
+        Some("settings"), None, None, None, "warning", claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true, "webhook_secret": webhook_secret })))
@@ -189,12 +189,12 @@ pub async fn delete_config(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "whmcs.removed",
-        Some("settings"), None, None, ip.as_deref(),
+        Some("settings"), None, None, ip.as_deref(), claims.key_id,
     ).await;
 
     crate::services::security_hardening::audit_log(
         &state.db, "whmcs.removed", Some(&claims.email), ip.as_deref(),
-        Some("settings"), None, None, None, "warning",
+        Some("settings"), None, None, None, "warning", claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -541,7 +541,7 @@ pub async fn start_migration(
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "migration.started",
         Some("container"), Some(&body.container_name),
-        Some(&format!("to server {}", body.target_server_id)), None,
+        Some(&format!("to server {}", body.target_server_id)), None, claims.key_id,
     ).await;
 
     Ok((StatusCode::CREATED, Json(serde_json::json!({

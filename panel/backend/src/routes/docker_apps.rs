@@ -457,6 +457,7 @@ pub async fn deploy(
     }
 
     // Spawn background deploy task
+    let key_id = claims.key_id;
     tokio::spawn(async move {
         let emit = |step: &str, label: &str, status: &str, msg: Option<String>| {
             let ev = ProvisionStep {
@@ -696,7 +697,7 @@ pub async fn deploy(
                     deploy_domain.as_ref().map(|d| format!(" → {d}")).unwrap_or_default());
                 activity::log_activity(
                     &db, user_id, &email, "app.deploy",
-                    Some("app"), Some(&app_name), Some(&template), None,
+                    Some("app"), Some(&app_name), Some(&template), None, key_id,
                 ).await;
 
                 crate::services::extensions::fire_event(&db, "app.deployed", serde_json::json!({
@@ -1191,7 +1192,7 @@ pub async fn stop_app(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "container.stop",
-        Some("container"), Some(&container_id), None, None,
+        Some("container"), Some(&container_id), None, None, claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -1225,7 +1226,7 @@ pub async fn start_app(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "container.start",
-        Some("container"), Some(&container_id), None, None,
+        Some("container"), Some(&container_id), None, None, claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -1255,7 +1256,7 @@ pub async fn restart_app(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "container.restart",
-        Some("container"), Some(&container_id), None, None,
+        Some("container"), Some(&container_id), None, None, claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -1310,6 +1311,7 @@ pub async fn update_app(
     let user_id = claims.sub;
     let email = claims.email.clone();
     let cid = container_id.clone();
+    let key_id = claims.key_id;
 
     tokio::spawn(async move {
         let emit = |step: &str, label: &str, status: &str, msg: Option<String>| {
@@ -1422,7 +1424,7 @@ pub async fn update_app(
                 }
                 activity::log_activity(
                     &db, user_id, &email, "app.update",
-                    Some("app"), Some(&cid), None, None,
+                    Some("app"), Some(&cid), None, None, key_id,
                 ).await;
                 tracing::info!(
                     "App updated{}: {cid}",
@@ -1553,6 +1555,7 @@ pub async fn update_env(
     let user_id = claims.sub;
     let email = claims.email.clone();
     let cid = container_id.clone();
+    let key_id = claims.key_id;
     let result = tokio::spawn(async move {
         // Recorded BEFORE the recreate starts and cleared unconditionally
         // once the call returns, same reasoning as `update_app` above — the
@@ -1583,7 +1586,7 @@ pub async fn update_env(
         }
         activity::log_activity(
             &db, user_id, &email, "app.update_env",
-            Some("app"), Some(&cid), None, None,
+            Some("app"), Some(&cid), None, None, key_id,
         )
         .await;
         Ok::<_, ApiError>(result)
@@ -1659,6 +1662,7 @@ pub async fn update_image(
     let user_id = claims.sub;
     let email = claims.email.clone();
     let cid = container_id.clone();
+    let key_id = claims.key_id;
     let result = tokio::spawn(async move {
         // Recorded BEFORE the recreate starts and cleared unconditionally
         // once the call returns, same reasoning as `update_app`/`update_env`
@@ -1693,7 +1697,7 @@ pub async fn update_image(
 
         activity::log_activity(
             &db, user_id, &email, "app.change_image",
-            Some("app"), Some(&cid), Some(&image), None,
+            Some("app"), Some(&cid), Some(&image), None, key_id,
         ).await;
 
         tracing::info!("App image changed: {cid} → {image}");
@@ -1750,7 +1754,7 @@ pub async fn update_limits(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "app.update_limits",
-        Some("app"), Some(&container_id), None, None,
+        Some("app"), Some(&container_id), None, None, claims.key_id,
     ).await;
 
     tracing::info!("App limits updated: {container_id} (mem: {:?}MB, cpu: {:?}%)", memory_mb, cpu_percent);
@@ -1936,6 +1940,7 @@ pub async fn registry_login(
         None,
         None,
         ip.as_deref(),
+        claims.key_id,
     )
     .await;
     crate::services::security_hardening::audit_log(
@@ -1948,6 +1953,7 @@ pub async fn registry_login(
         None,
         None,
         "warning",
+        claims.key_id,
     )
     .await;
     Ok(Json(result))
@@ -2009,7 +2015,7 @@ pub async fn prune_images(
         .map_err(|e| agent_error("Prune images", e))?;
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "app.prune_images",
-        Some("docker"), None, None, None,
+        Some("docker"), None, None, None, claims.key_id,
     ).await;
     Ok(Json(result))
 }
@@ -2028,7 +2034,7 @@ pub async fn remove_image(
         .map_err(|e| agent_error("Remove image", e))?;
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "app.remove_image",
-        Some("docker"), Some(&id), None, None,
+        Some("docker"), Some(&id), None, None, claims.key_id,
     ).await;
     Ok(Json(result))
 }
@@ -2051,7 +2057,7 @@ pub async fn snapshot_container(
         .map_err(|e| agent_error("Container snapshot", e))?;
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "app.snapshot",
-        Some("app"), Some(&container_id), None, None,
+        Some("app"), Some(&container_id), None, None, claims.key_id,
     ).await;
     Ok(Json(result))
 }
@@ -2143,7 +2149,7 @@ pub async fn compose_deploy(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "app.compose_deploy",
-        Some("app"), None, Some("compose"), None,
+        Some("app"), None, Some("compose"), None, claims.key_id,
     ).await;
 
     Ok((StatusCode::CREATED, Json(result)))
@@ -2281,11 +2287,11 @@ pub async fn remove_app(
     let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "app.remove",
-        Some("app"), Some(&container_id), None, ip.as_deref(),
+        Some("app"), Some(&container_id), None, ip.as_deref(), claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, "app.remove", Some(&claims.email), ip.as_deref(),
-        Some("app"), Some(&container_id), None, None, "warning",
+        Some("app"), Some(&container_id), None, None, "warning", claims.key_id,
     ).await;
 
     fire_event(&state.db, "app.removed", serde_json::json!({
@@ -2493,11 +2499,11 @@ pub async fn create_policy(
     let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "container_policy.created",
-        Some("container_policy"), Some(&user_id.to_string()), None, ip.as_deref(),
+        Some("container_policy"), Some(&user_id.to_string()), None, ip.as_deref(), claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, "container_policy.created", Some(&claims.email), ip.as_deref(),
-        Some("container_policy"), Some(&user_id.to_string()), None, None, "warning",
+        Some("container_policy"), Some(&user_id.to_string()), None, None, "warning", claims.key_id,
     ).await;
 
     Ok((StatusCode::CREATED, Json(serde_json::json!({ "ok": true, "id": id.0 }))))
@@ -2575,11 +2581,11 @@ pub async fn update_policy(
     let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "container_policy.updated",
-        Some("container_policy"), Some(&user_id.to_string()), None, ip.as_deref(),
+        Some("container_policy"), Some(&user_id.to_string()), None, ip.as_deref(), claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, "container_policy.updated", Some(&claims.email), ip.as_deref(),
-        Some("container_policy"), Some(&user_id.to_string()), None, None, "warning",
+        Some("container_policy"), Some(&user_id.to_string()), None, None, "warning", claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -2809,7 +2815,7 @@ pub async fn update_sleep_config(
     activity::log_activity(
         &state.db, claims.sub, &claims.email,
         if enabled { "container.auto_sleep_enabled" } else { "container.auto_sleep_disabled" },
-        Some("container"), Some(&container_name), None, None,
+        Some("container"), Some(&container_name), None, None, claims.key_id,
     ).await;
 
     // Report whether the loop that honours this setting is actually running.
@@ -2877,7 +2883,7 @@ pub async fn wake_container(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "container.wake",
-        Some("container"), Some(&container_id), None, None,
+        Some("container"), Some(&container_id), None, None, claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -2928,7 +2934,7 @@ pub async fn sleep_container(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "container.manual_sleep",
-        Some("container"), Some(&container_id), None, None,
+        Some("container"), Some(&container_id), None, None, claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))

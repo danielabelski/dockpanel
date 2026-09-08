@@ -237,7 +237,7 @@ pub async fn create_vault(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "vault.create",
-        Some("vault"), Some(&req.name), None, None,
+        Some("vault"), Some(&req.name), None, None, claims.key_id,
     ).await;
 
     Ok((StatusCode::CREATED, Json(vault)))
@@ -298,7 +298,7 @@ pub async fn update_vault(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "vault.update",
-        Some("vault"), Some(&vault.name), None, None,
+        Some("vault"), Some(&vault.name), None, None, claims.key_id,
     ).await;
 
     Ok(Json(vault))
@@ -412,7 +412,7 @@ pub async fn create_secret(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "secret.create",
-        Some("secret"), Some(&req.key), None, None,
+        Some("secret"), Some(&req.key), None, None, claims.key_id,
     ).await;
 
     Ok((StatusCode::CREATED, Json(SecretEntry {
@@ -598,7 +598,7 @@ pub async fn inject_to_site(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "secrets.inject",
-        Some("site"), Some(&domain), Some(&format!("{} secrets", rows.len())), ip.as_deref(),
+        Some("site"), Some(&domain), Some(&format!("{} secrets", rows.len())), ip.as_deref(), claims.key_id,
     ).await;
 
     crate::services::security_hardening::audit_log(
@@ -611,6 +611,7 @@ pub async fn inject_to_site(
         Some(&format!("{} secrets", rows.len())),
         None,
         "warning",
+        claims.key_id,
     ).await;
 
     fire_event(&state.db, "secrets.injected", serde_json::json!({

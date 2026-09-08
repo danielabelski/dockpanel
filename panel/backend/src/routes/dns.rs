@@ -340,7 +340,7 @@ pub async fn create_zone(
             tracing::info!("DNS zone added (cloudflare): {} by {}", zone.domain, claims.email);
             activity::log_activity(
                 &state.db, claims.sub, &claims.email, "dns.zone.create",
-                Some("dns"), Some(&zone.domain), None, None,
+                Some("dns"), Some(&zone.domain), None, None, claims.key_id,
             ).await;
 
             Ok((StatusCode::CREATED, Json(serde_json::json!({
@@ -401,7 +401,7 @@ pub async fn create_zone(
             tracing::info!("DNS zone added (powerdns): {} by {}", zone.domain, claims.email);
             activity::log_activity(
                 &state.db, claims.sub, &claims.email, "dns.zone.create",
-                Some("dns"), Some(&zone.domain), Some("powerdns"), None,
+                Some("dns"), Some(&zone.domain), Some("powerdns"), None, claims.key_id,
             ).await;
 
             Ok((StatusCode::CREATED, Json(serde_json::json!({
@@ -587,7 +587,7 @@ pub async fn create_record(
 
             activity::log_activity(
                 &state.db, claims.sub, &claims.email, "dns.record.create",
-                Some("dns"), Some(&zone.domain), Some(&format!("{} {}", body.rtype, body.name)), None,
+                Some("dns"), Some(&zone.domain), Some(&format!("{} {}", body.rtype, body.name)), None, claims.key_id,
             ).await;
 
             Ok((StatusCode::CREATED, Json(cf_resp.get("result").cloned().unwrap_or_default())))
@@ -673,7 +673,7 @@ pub async fn create_record(
 
             activity::log_activity(
                 &state.db, claims.sub, &claims.email, "dns.record.create",
-                Some("dns"), Some(&zone.domain), Some(&format!("{} {}", body.rtype, body.name)), None,
+                Some("dns"), Some(&zone.domain), Some(&format!("{} {}", body.rtype, body.name)), None, claims.key_id,
             ).await;
 
             Ok((StatusCode::CREATED, Json(serde_json::json!({
@@ -752,7 +752,7 @@ pub async fn update_record(
 
             activity::log_activity(
                 &state.db, claims.sub, &claims.email, "dns.record.update",
-                Some("dns"), Some(&zone.domain), Some(&format!("{} {}", body.rtype, body.name)), None,
+                Some("dns"), Some(&zone.domain), Some(&format!("{} {}", body.rtype, body.name)), None, claims.key_id,
             ).await;
 
             Ok(Json(cf_resp.get("result").cloned().unwrap_or_default()))
@@ -903,7 +903,7 @@ pub async fn update_record(
 
             activity::log_activity(
                 &state.db, claims.sub, &claims.email, "dns.record.update",
-                Some("dns"), Some(&zone.domain), Some(&format!("{} {}", body.rtype, body.name)), None,
+                Some("dns"), Some(&zone.domain), Some(&format!("{} {}", body.rtype, body.name)), None, claims.key_id,
             ).await;
 
             Ok(Json(serde_json::json!({
@@ -965,12 +965,12 @@ pub async fn delete_record(
 
             activity::log_activity(
                 &state.db, claims.sub, &claims.email, "dns.record.delete",
-                Some("dns"), Some(&zone.domain), None, ip.as_deref(),
+                Some("dns"), Some(&zone.domain), None, ip.as_deref(), claims.key_id,
             ).await;
 
             crate::services::security_hardening::audit_log(
                 &state.db, "dns.record.delete", Some(&claims.email), ip.as_deref(),
-                Some("dns"), Some(&zone.domain), None, None, "warning",
+                Some("dns"), Some(&zone.domain), None, None, "warning", claims.key_id,
             ).await;
 
             Ok(Json(serde_json::json!({ "ok": true })))
@@ -1039,12 +1039,12 @@ pub async fn delete_record(
 
             activity::log_activity(
                 &state.db, claims.sub, &claims.email, "dns.record.delete",
-                Some("dns"), Some(&zone.domain), None, ip.as_deref(),
+                Some("dns"), Some(&zone.domain), None, ip.as_deref(), claims.key_id,
             ).await;
 
             crate::services::security_hardening::audit_log(
                 &state.db, "dns.record.delete", Some(&claims.email), ip.as_deref(),
-                Some("dns"), Some(&zone.domain), None, None, "warning",
+                Some("dns"), Some(&zone.domain), None, None, "warning", claims.key_id,
             ).await;
 
             Ok(Json(serde_json::json!({ "ok": true })))
@@ -1565,12 +1565,12 @@ pub async fn cf_update_setting(
     activity::log_activity(
         &state.db, claims.sub, &claims.email,
         &format!("dns.cf.setting.{setting}"),
-        Some("dns_zone"), Some(&zone.domain), None, ip.as_deref(),
+        Some("dns_zone"), Some(&zone.domain), None, ip.as_deref(), claims.key_id,
     ).await;
 
     crate::services::security_hardening::audit_log(
         &state.db, &format!("dns.cf.setting.{setting}"), Some(&claims.email), ip.as_deref(),
-        Some("dns_zone"), Some(&zone.domain), None, None, "warning",
+        Some("dns_zone"), Some(&zone.domain), None, None, "warning", claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({
@@ -1639,7 +1639,7 @@ pub async fn cf_purge_cache(
     activity::log_activity(
         &state.db, claims.sub, &claims.email,
         &format!("dns.cf.cache.purge.{purge_type}"),
-        Some("dns_zone"), Some(&zone.domain), None, None,
+        Some("dns_zone"), Some(&zone.domain), None, None, claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({

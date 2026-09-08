@@ -417,6 +417,7 @@ pub async fn create(
         Some(&row.alias),
         None,
         ip.as_deref(),
+        claims.key_id,
     )
     .await;
 
@@ -430,6 +431,7 @@ pub async fn create(
         None,
         None,
         "warning",
+        claims.key_id,
     )
     .await;
 
@@ -516,6 +518,7 @@ pub async fn replace(
         Some(&updated.alias),
         None,
         ip.as_deref(),
+        claims.key_id,
     )
     .await;
 
@@ -529,6 +532,7 @@ pub async fn replace(
         None,
         None,
         "warning",
+        claims.key_id,
     )
     .await;
 
@@ -598,6 +602,7 @@ pub async fn remove(
         Some(&row.alias),
         None,
         ip.as_deref(),
+        claims.key_id,
     )
     .await;
 
@@ -611,6 +616,7 @@ pub async fn remove(
         None,
         None,
         "warning",
+        claims.key_id,
     )
     .await;
 

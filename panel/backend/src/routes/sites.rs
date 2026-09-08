@@ -628,6 +628,7 @@ pub async fn create(
             activity::log_activity(
                 &state.db, claims.sub, &claims.email, "site.create",
                 Some("site"), Some(&body.domain), Some(runtime), ip.as_deref(),
+                claims.key_id,
             ).await;
 
             // Panel notification
@@ -1534,6 +1535,7 @@ pub async fn switch_php(
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "site.php_switch",
         Some("site"), Some(&site.domain), Some(version), None,
+        claims.key_id,
     ).await;
 
     Ok(Json(updated))
@@ -1686,6 +1688,7 @@ pub async fn switch_runtime(
             None => format!("{} -> {}", site.runtime, target),
         }),
         None,
+        claims.key_id,
     )
     .await;
 
@@ -1921,6 +1924,7 @@ pub async fn update_limits(
             activity::log_activity(
                 &state.db, claims.sub, &claims.email, "site.bandwidth_suspension_lifted",
                 Some("site"), Some(&site.domain), Some("quota raised or removed"), None,
+                claims.key_id,
             ).await;
         }
     }
@@ -1929,6 +1933,7 @@ pub async fn update_limits(
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "site.limits",
         Some("site"), Some(&site.domain), None, None,
+        claims.key_id,
     ).await;
 
     Ok(Json(updated))
@@ -2194,10 +2199,12 @@ pub async fn remove(
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "site.delete",
         Some("site"), Some(&site.domain), None, ip.as_deref(),
+        claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, "site.delete", Some(&claims.email), ip.as_deref(),
         Some("site"), Some(&site.domain), None, None, "critical",
+        claims.key_id,
     ).await;
 
     // Panel notification
@@ -2912,7 +2919,7 @@ pub async fn clone_site(
         .map_err(|e| agent_error("Nginx config", e))?;
 
     activity::log_activity(&state.db, claims.sub, &claims.email, "site.clone",
-        Some("site"), Some(target_domain), Some(&source.domain), None).await;
+        Some("site"), Some(target_domain), Some(&source.domain), None, claims.key_id).await;
 
     // Reseller site counter already incremented atomically by the reserve above.
 
@@ -3098,10 +3105,11 @@ pub async fn upload_ssl(
 
     let ip = crate::routes::client_ip(&headers);
     activity::log_activity(&state.db, claims.sub, &claims.email, "ssl.upload",
-        Some("site"), Some(&domain), None, ip.as_deref()).await;
+        Some("site"), Some(&domain), None, ip.as_deref(), claims.key_id).await;
     crate::services::security_hardening::audit_log(
         &state.db, "ssl.upload", Some(&claims.email), ip.as_deref(),
         Some("site"), Some(&domain), None, None, "warning",
+        claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -3380,6 +3388,7 @@ pub async fn rename_domain(
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "site.rename_domain",
         Some("site"), Some(&new_domain), Some(&old_domain), None,
+        claims.key_id,
     ).await;
 
     notifications::notify_panel(&state.db, Some(claims.sub),
@@ -3452,6 +3461,7 @@ pub async fn toggle_enabled(
         &state.db, claims.sub, &claims.email,
         &format!("site.{action_label}"),
         Some("site"), Some(&site.domain), None, None,
+        claims.key_id,
     ).await;
 
     notifications::notify_panel(&state.db, Some(claims.sub),
@@ -3522,6 +3532,7 @@ pub async fn toggle_fastcgi_cache(
         &state.db, claims.sub, &claims.email,
         &format!("site.fastcgi_cache.{action}"),
         Some("site"), Some(&site.domain), None, None,
+        claims.key_id,
     ).await;
 
     notifications::notify_panel(&state.db, Some(claims.sub),
@@ -3566,6 +3577,7 @@ pub async fn purge_fastcgi_cache(
         &state.db, claims.sub, &claims.email,
         "site.fastcgi_cache.purge",
         Some("site"), Some(&site.domain), None, None,
+        claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({
@@ -3666,6 +3678,7 @@ pub async fn toggle_redis_cache(
         &state.db, claims.sub, &claims.email,
         &format!("site.redis_cache.{action}"),
         Some("site"), Some(&site.domain), None, None,
+        claims.key_id,
     ).await;
 
     notifications::notify_panel(&state.db, Some(claims.sub),
@@ -3711,6 +3724,7 @@ pub async fn purge_redis_cache(
         &state.db, claims.sub, &claims.email,
         "site.redis_cache.purge",
         Some("site"), Some(&site.domain), None, None,
+        claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({
@@ -3790,10 +3804,12 @@ pub async fn enable_sftp(
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "site.sftp.enabled",
         Some("site"), Some(&site.domain), None, ip.as_deref(),
+        claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, "site.sftp.enabled", Some(&claims.email), ip.as_deref(),
         Some("site"), Some(&site.domain), None, None, "warning",
+        claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true, "sftp_enabled": true })))
@@ -3872,10 +3888,12 @@ pub async fn disable_sftp(
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "site.sftp.disabled",
         Some("site"), Some(&site.domain), None, ip.as_deref(),
+        claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, "site.sftp.disabled", Some(&claims.email), ip.as_deref(),
         Some("site"), Some(&site.domain), None, None, "warning",
+        claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true, "sftp_enabled": false })))
@@ -3920,10 +3938,12 @@ pub async fn reset_sftp_password(
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "site.sftp.password_reset",
         Some("site"), Some(&site.domain), None, ip.as_deref(),
+        claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, "site.sftp.password_reset", Some(&claims.email), ip.as_deref(),
         Some("site"), Some(&site.domain), None, None, "warning",
+        claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true, "password": password })))
@@ -3990,12 +4010,14 @@ pub async fn toggle_waf(
         &state.db, claims.sub, &claims.email,
         &format!("site.waf.{}", if enabled { "enabled" } else { "disabled" }),
         Some("site"), Some(&site.domain), None, ip.as_deref(),
+        claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db,
         &format!("site.waf.{}", if enabled { "enabled" } else { "disabled" }),
         Some(&claims.email), ip.as_deref(),
         Some("site"), Some(&site.domain), None, None, "warning",
+        claims.key_id,
     ).await;
 
     notifications::notify_panel(&state.db, Some(claims.sub),
@@ -4080,6 +4102,7 @@ pub async fn optimize_images(
         &state.db, claims.sub, &claims.email,
         "site.optimize_images",
         Some("site"), Some(&site.domain), Some(format), None,
+        claims.key_id,
     ).await;
 
     Ok(Json(result))
@@ -4243,6 +4266,7 @@ pub async fn update_security_headers(
         &state.db, claims.sub, &claims.email,
         "site.security_headers",
         Some("site"), Some(&site.domain), None, None,
+        claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({
@@ -4299,12 +4323,14 @@ pub async fn toggle_bot_protection(
         &state.db, claims.sub, &claims.email,
         &format!("site.bot_protection.{mode}"),
         Some("site"), Some(&site.domain), None, ip.as_deref(),
+        claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db,
         &format!("site.bot_protection.{mode}"),
         Some(&claims.email), ip.as_deref(),
         Some("site"), Some(&site.domain), None, None, "warning",
+        claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({
@@ -4470,6 +4496,7 @@ pub async fn transfer(
         Some(&domain),
         Some(&format!("{previous_owner} -> {new_owner} ({email})")),
         crate::routes::client_ip(&headers).as_deref(),
+        claims.key_id,
     )
     .await;
     crate::services::security_hardening::audit_log(
@@ -4482,6 +4509,7 @@ pub async fn transfer(
         Some(&format!("{previous_owner} -> {new_owner} ({email})")),
         None,
         "critical",
+        claims.key_id,
     )
     .await;
 

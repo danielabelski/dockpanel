@@ -171,7 +171,7 @@ pub async fn set_config(
     tracing::info!("Deploy config set for {domain}: {}", body.repo_url);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "deploy.config",
-        Some("deploy"), Some(&domain), Some(&body.repo_url), None,
+        Some("deploy"), Some(&domain), Some(&body.repo_url), None, claims.key_id,
     ).await;
 
     Ok(Json(config))
@@ -242,6 +242,7 @@ pub async fn trigger(
     let user_id = claims.sub;
     let email = claims.email.clone();
     let domain_clone = domain.clone();
+    let key_id = claims.key_id;
 
     tokio::spawn(async move {
         let emit = |step: &str, label: &str, status: &str, msg: Option<String>| {
@@ -269,7 +270,7 @@ pub async fn trigger(
 
                 activity::log_activity(
                     &db, user_id, &email, "deploy.trigger",
-                    Some("deploy"), Some(&domain_clone), log.commit_hash.as_deref(), Some(&log.status),
+                    Some("deploy"), Some(&domain_clone), log.commit_hash.as_deref(), Some(&log.status), key_id,
                 ).await;
             }
             Err((_status, body)) => {
@@ -776,7 +777,7 @@ pub async fn rollback_release(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "deploy.rollback",
-        Some("deploy"), Some(&domain), Some(&release_id), Some("success"),
+        Some("deploy"), Some(&domain), Some(&release_id), Some("success"), claims.key_id,
     ).await;
 
     // Reload nginx to pick up any config changes

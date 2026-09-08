@@ -603,6 +603,7 @@ pub async fn create(
         Some(&stack.name),
         None,
         None,
+        claims.key_id,
     )
     .await;
 
@@ -753,6 +754,7 @@ pub async fn remove(
         Some(&name),
         None,
         ip.as_deref(),
+        claims.key_id,
     )
     .await;
 
@@ -766,6 +768,7 @@ pub async fn remove(
         None,
         None,
         "warning",
+        claims.key_id,
     )
     .await;
 
@@ -1077,6 +1080,7 @@ pub async fn update(
         Some(&name),
         None,
         None,
+        claims.key_id,
     )
     .await;
 
@@ -1396,6 +1400,7 @@ pub async fn renew_ssl(
         Some(domain),
         Some(&format!("stack_id={id}")),
         None,
+        claims.key_id,
     )
     .await;
 

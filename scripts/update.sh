@@ -153,6 +153,7 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 AGENT_SRC="$REPO_DIR/panel/agent"
 API_SRC="$REPO_DIR/panel/backend"
 CLI_SRC="$REPO_DIR/panel/cli"
+MCP_SRC="$REPO_DIR/panel/mcp"
 
 # Directories the agent unit declares in ReadWritePaths, with any `-` prefix
 # stripped. Derived from the unit that is about to be deployed (or, on a layout
@@ -168,6 +169,7 @@ FRONTEND_DIR="$REPO_DIR/panel/frontend"
 AGENT_BIN="/usr/local/bin/dockpanel-agent"
 API_BIN="/usr/local/bin/dockpanel-api"
 CLI_BIN="/usr/local/bin/dockpanel"
+MCP_BIN="/usr/local/bin/dockpanel-mcp"
 INSTALL_FROM_RELEASE="${INSTALL_FROM_RELEASE:-0}"
 GITHUB_REPO="ovexro/dockpanel"
 
@@ -413,6 +415,11 @@ if [ "$INSTALL_FROM_RELEASE" = "1" ]; then
     verify_checksum /tmp/dockpanel-cli-new "dockpanel-cli-linux-${DL_ARCH}"
     chmod +x /tmp/dockpanel-cli-new
 
+    log "Downloading MCP server (${DL_ARCH})..."
+    dp_fetch "${BASE_URL}/dockpanel-mcp-linux-${DL_ARCH}" /tmp/dockpanel-mcp-new
+    verify_checksum /tmp/dockpanel-mcp-new "dockpanel-mcp-linux-${DL_ARCH}"
+    chmod +x /tmp/dockpanel-mcp-new
+
     # Download and extract frontend
     log "Downloading frontend..."
     dp_fetch "${BASE_URL}/dockpanel-frontend.tar.gz" /tmp/dockpanel-frontend.tar.gz
@@ -593,6 +600,16 @@ if [ -f "$AGENT_SRC/dockpanel-agent.service" ]; then
     chmod 644 /etc/systemd/system/dockpanel-agent.service
 else
     warn "Agent unit source not found at $AGENT_SRC/dockpanel-agent.service — keeping existing on-disk unit (no repo tree on this layout)"
+fi
+
+# MCP server unit — deploy from repo (single source of truth:
+# panel/mcp/dockpanel-mcp.service). Installed but never enabled/started here:
+# see the matching comment in setup.sh's create_services(). An install that
+# already has the service enabled (a manual opt-in) keeps running through the
+# upgrade — this only refreshes the unit FILE, it never touches enablement.
+if [ -f "$MCP_SRC/dockpanel-mcp.service" ]; then
+    cp "$MCP_SRC/dockpanel-mcp.service" /etc/systemd/system/dockpanel-mcp.service
+    chmod 644 /etc/systemd/system/dockpanel-mcp.service
 fi
 
 cat > /etc/systemd/system/dockpanel-api.service << 'EOF'
@@ -1000,21 +1017,40 @@ log "Backing up current binaries..."
 cp "$AGENT_BIN" "${AGENT_BIN}.bak" 2>/dev/null || true
 cp "$API_BIN" "${API_BIN}.bak" 2>/dev/null || true
 cp "$CLI_BIN" "${CLI_BIN}.bak" 2>/dev/null || true
+# dockpanel-mcp is a NEW binary as of this release — on every box upgrading
+# for the first time since it shipped, $MCP_BIN does not exist yet, so there
+# is nothing to back up and nothing to roll back TO. Recorded now so the
+# rollback function below can tell "no backup because first install" apart
+# from "no backup because something is actually wrong".
+MCP_BIN_PRE_EXISTED=0
+[ -f "$MCP_BIN" ] && MCP_BIN_PRE_EXISTED=1
+cp "$MCP_BIN" "${MCP_BIN}.bak" 2>/dev/null || true
+
+# dockpanel-mcp is opt-in (§ setup.sh/update.sh systemd-units comment) — most
+# installs have it deployed but never enabled, so unlike agent/api it is only
+# stopped/restarted here if an operator already turned it on. Captured BEFORE
+# the stop below since `systemctl is-active` after stopping would always say no.
+MCP_WAS_ACTIVE=0
+systemctl is-active --quiet dockpanel-mcp 2>/dev/null && MCP_WAS_ACTIVE=1
 
 log "Stopping services..."
 _dockpanel_services_stopped=1
 systemctl stop dockpanel-agent dockpanel-api 2>/dev/null || true
+[ "$MCP_WAS_ACTIVE" = "1" ] && systemctl stop dockpanel-mcp 2>/dev/null || true
 
 if [ "$INSTALL_FROM_RELEASE" = "1" ]; then
     mv /tmp/dockpanel-agent-new "$AGENT_BIN"
     mv /tmp/dockpanel-api-new "$API_BIN"
     mv /tmp/dockpanel-cli-new "$CLI_BIN"
+    mv /tmp/dockpanel-mcp-new "$MCP_BIN"
 else
     cp "$AGENT_SRC/target/release/dockpanel-agent" "$AGENT_BIN"
     cp "$API_SRC/target/release/dockpanel-api" "$API_BIN"
     cp "$CLI_SRC/target/release/dockpanel" "$CLI_BIN"
+    [ -f "$MCP_SRC/target/release/dockpanel-mcp" ] && cp "$MCP_SRC/target/release/dockpanel-mcp" "$MCP_BIN"
 fi
 chmod +x "$AGENT_BIN" "$API_BIN" "$CLI_BIN"
+[ -f "$MCP_BIN" ] && chmod +x "$MCP_BIN"
 
 # SELinux: restore the binaries' security context after the swap.
 #
@@ -1034,15 +1070,16 @@ chmod +x "$AGENT_BIN" "$API_BIN" "$CLI_BIN"
 #
 # No-op on Debian/Ubuntu, where restorecon is usually absent.
 if command -v restorecon > /dev/null 2>&1; then
-    restorecon -F "$AGENT_BIN" "$API_BIN" "$CLI_BIN" 2>/dev/null || true
+    restorecon -F "$AGENT_BIN" "$API_BIN" "$CLI_BIN" "$MCP_BIN" 2>/dev/null || true
 fi
 
-log "Binaries updated (agent: $(du -h "$AGENT_BIN" | cut -f1), api: $(du -h "$API_BIN" | cut -f1), cli: $(du -h "$CLI_BIN" | cut -f1))"
+log "Binaries updated (agent: $(du -h "$AGENT_BIN" | cut -f1), api: $(du -h "$API_BIN" | cut -f1), cli: $(du -h "$CLI_BIN" | cut -f1), mcp: $(du -h "$MCP_BIN" 2>/dev/null | cut -f1 || echo '?'))"
 
 systemctl daemon-reload
 systemctl start dockpanel-agent
 sleep 1
 systemctl start dockpanel-api
+[ "$MCP_WAS_ACTIVE" = "1" ] && systemctl start dockpanel-mcp
 _dockpanel_services_stopped=0
 log "Services restarted"
 
@@ -1064,10 +1101,11 @@ rollback() {
     # busy inode — it is what the forward swap above already uses.
     _dockpanel_services_stopped=1
     systemctl stop dockpanel-agent dockpanel-api 2>/dev/null || true
+    [ "$MCP_WAS_ACTIVE" = "1" ] && systemctl stop dockpanel-mcp 2>/dev/null || true
 
     local restore_failed=0
     local pair
-    for pair in "$AGENT_BIN" "$API_BIN" "$CLI_BIN"; do
+    for pair in "$AGENT_BIN" "$API_BIN" "$CLI_BIN" "$MCP_BIN"; do
         if [ -f "${pair}.bak" ]; then
             if mv "${pair}.bak" "$pair"; then
                 log "Restored $pair"
@@ -1075,6 +1113,13 @@ rollback() {
                 error "FAILED to restore $pair from ${pair}.bak"
                 restore_failed=1
             fi
+        elif [ "$pair" = "$MCP_BIN" ] && [ "$MCP_BIN_PRE_EXISTED" = "0" ]; then
+            # Nothing to roll back to — this box never had dockpanel-mcp before
+            # this update. Remove the newly-placed (unhealthy-update) binary
+            # rather than leaving a stray one an un-rolled-back systemd unit
+            # could later be pointed at.
+            rm -f "$pair"
+            log "No prior $pair to restore (first install of this binary) — removed"
         else
             error "No backup at ${pair}.bak — cannot restore $pair"
             restore_failed=1
@@ -1089,6 +1134,9 @@ rollback() {
     systemctl start dockpanel-agent || error "dockpanel-agent did not start after rollback"
     sleep 1
     systemctl start dockpanel-api || error "dockpanel-api did not start after rollback"
+    if [ "$MCP_WAS_ACTIVE" = "1" ]; then
+        systemctl start dockpanel-mcp || error "dockpanel-mcp did not start after rollback"
+    fi
     _dockpanel_services_stopped=0
 
     if [ "$restore_failed" = "1" ]; then
@@ -1157,12 +1205,15 @@ _dockpanel_write_result true "complete" \
     "updated to ${DOCKPANEL_VERSION:-latest} and passed the post-deploy health checks"
 
 # Clean up backups
-rm -f "${AGENT_BIN}.bak" "${API_BIN}.bak" "${CLI_BIN}.bak"
+rm -f "${AGENT_BIN}.bak" "${API_BIN}.bak" "${CLI_BIN}.bak" "${MCP_BIN}.bak"
 
 echo ""
 echo -e "${GREEN}${BOLD}Update complete!${NC}"
 echo ""
 echo -e "  Agent: $(systemctl is-active dockpanel-agent)"
 echo -e "  API:   $(systemctl is-active dockpanel-api)"
+if systemctl list-unit-files dockpanel-mcp.service > /dev/null 2>&1; then
+    echo -e "  MCP:   $(systemctl is-active dockpanel-mcp) $([ "$MCP_WAS_ACTIVE" = "0" ] && echo '(not enabled — see docs.dockpanel.dev)')"
+fi
 echo -e "  Version: $($CLI_BIN --version 2>/dev/null || echo 'unknown')"
 echo ""

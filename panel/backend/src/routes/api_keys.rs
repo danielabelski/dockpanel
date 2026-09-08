@@ -89,12 +89,12 @@ pub async fn create(
     let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "api_key.created",
-        Some("api_key"), Some(name), None, ip.as_deref(),
+        Some("api_key"), Some(name), None, ip.as_deref(), claims.key_id,
     ).await;
 
     crate::services::security_hardening::audit_log(
         &state.db, "api_key.created", Some(&claims.email), ip.as_deref(),
-        Some("api_key"), Some(name), None, None, "info",
+        Some("api_key"), Some(name), None, None, "info", claims.key_id,
     ).await;
 
     Ok((
@@ -142,12 +142,12 @@ pub async fn revoke(
     let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "api_key.revoked",
-        Some("api_key"), Some(&key_name), None, ip.as_deref(),
+        Some("api_key"), Some(&key_name), None, ip.as_deref(), claims.key_id,
     ).await;
 
     crate::services::security_hardening::audit_log(
         &state.db, "api_key.revoked", Some(&claims.email), ip.as_deref(),
-        Some("api_key"), Some(&key_name), None, None, "info",
+        Some("api_key"), Some(&key_name), None, None, "info", claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -198,12 +198,12 @@ pub async fn rotate(
     let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "api_key.rotated",
-        Some("api_key"), Some(&name), None, ip.as_deref(),
+        Some("api_key"), Some(&name), None, ip.as_deref(), claims.key_id,
     ).await;
 
     crate::services::security_hardening::audit_log(
         &state.db, "api_key.rotated", Some(&claims.email), ip.as_deref(),
-        Some("api_key"), Some(&name), None, None, "info",
+        Some("api_key"), Some(&name), None, None, "info", claims.key_id,
     ).await;
 
     Ok((

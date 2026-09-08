@@ -203,6 +203,7 @@ pub async fn create(
         Some(name),
         None,
         ip.as_deref(),
+        claims.key_id,
     )
     .await;
 
@@ -216,6 +217,7 @@ pub async fn create(
         None,
         None,
         "info",
+        claims.key_id,
     )
     .await;
 
@@ -344,6 +346,7 @@ pub async fn update(
         Some(updated_name),
         None,
         None,
+        claims.key_id,
     )
     .await;
 
@@ -398,6 +401,7 @@ pub async fn remove(
         Some(&ext_name),
         None,
         ip.as_deref(),
+        claims.key_id,
     )
     .await;
 
@@ -411,6 +415,7 @@ pub async fn remove(
         None,
         None,
         "warning",
+        claims.key_id,
     )
     .await;
 
@@ -597,6 +602,7 @@ pub async fn rotate_secret(
         Some(&ext_name),
         None,
         ip.as_deref(),
+        claims.key_id,
     )
     .await;
 
@@ -610,6 +616,7 @@ pub async fn rotate_secret(
         None,
         None,
         "info",
+        claims.key_id,
     )
     .await;
 

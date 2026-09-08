@@ -136,7 +136,7 @@ pub async fn set_schedule(
     tracing::info!("Backup schedule set for {domain}: {}", schedule.schedule);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "backup.schedule",
-        Some("backup"), Some(&domain), Some(&schedule.schedule), None,
+        Some("backup"), Some(&domain), Some(&schedule.schedule), None, claims.key_id,
     ).await;
 
     Ok(Json(schedule))

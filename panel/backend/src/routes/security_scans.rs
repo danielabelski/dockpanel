@@ -232,6 +232,7 @@ pub async fn trigger_scan(
         None,
         Some(&detail),
         None,
+        claims.key_id,
     )
     .await;
 

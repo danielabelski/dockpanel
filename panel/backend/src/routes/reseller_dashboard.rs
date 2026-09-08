@@ -233,6 +233,7 @@ pub async fn create_user(
         Some(&user_email),
         None,
         None,
+        claims.key_id,
     )
     .await;
 
@@ -336,6 +337,7 @@ pub async fn update_user(
         Some(&user.1),
         None,
         ip.as_deref(),
+        claims.key_id,
     )
     .await;
 
@@ -349,6 +351,7 @@ pub async fn update_user(
         None,
         None,
         "warning",
+        claims.key_id,
     )
     .await;
 
@@ -432,6 +435,7 @@ pub async fn delete_user(
         Some(&user.1),
         None,
         ip.as_deref(),
+        claims.key_id,
     )
     .await;
 
@@ -445,6 +449,7 @@ pub async fn delete_user(
         None,
         None,
         "warning",
+        claims.key_id,
     )
     .await;
 

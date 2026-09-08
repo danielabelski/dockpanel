@@ -51,6 +51,7 @@ FRONTEND_DIR="$REPO_DIR/panel/frontend"
 AGENT_SRC="$REPO_DIR/panel/agent"
 API_SRC="$REPO_DIR/panel/backend"
 CLI_SRC="$REPO_DIR/panel/cli"
+MCP_SRC="$REPO_DIR/panel/mcp"
 
 # Directories the agent unit declares in ReadWritePaths, with any `-` prefix
 # stripped. The unit (panel/agent/dockpanel-agent.service) is the single source
@@ -1203,6 +1204,17 @@ create_services() {
     cp "$AGENT_SRC/dockpanel-agent.service" /etc/systemd/system/dockpanel-agent.service
     chmod 644 /etc/systemd/system/dockpanel-agent.service
 
+    # MCP server — deploy from repo (single source of truth: panel/mcp/dockpanel-mcp.service).
+    # Installed but deliberately NOT enabled/started: v1 has no settings toggle
+    # or mint-key UI yet (session 2), so a fresh install would just log
+    # "no panel API key configured" forever. `systemctl enable --now
+    # dockpanel-mcp` is a documented manual step once an operator has minted a
+    # key at Settings → API Keys and saved it to /etc/dockpanel/mcp.token.
+    if [ -f "$MCP_SRC/dockpanel-mcp.service" ]; then
+        cp "$MCP_SRC/dockpanel-mcp.service" /etc/systemd/system/dockpanel-mcp.service
+        chmod 644 /etc/systemd/system/dockpanel-mcp.service
+    fi
+
     # API service
     cat > /etc/systemd/system/dockpanel-api.service << 'EOF'
 [Unit]
@@ -1473,6 +1485,25 @@ ${PANEL_TLS_BLOCK}
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
+    }
+
+    # MCP server (read-only v1; opt-in, see panel/mcp) — exact match, not a
+    # prefix: Streamable HTTP is one fixed endpoint, not a family of routes
+    # like /api/. Not started by default (create_services() installs the unit
+    # but never enables it), so this 502s until an operator opts in — expected
+    # for a surface nobody has turned on yet.
+    location = /mcp {
+        proxy_pass http://127.0.0.1:3081;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        access_log off;
     }
 
     # Frontend static files

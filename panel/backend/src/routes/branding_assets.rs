@@ -94,6 +94,7 @@ pub async fn upload_logo(
         Some(filename.as_str()),
         Some(&format!("bytes={}", body.len())),
         None,
+        claims.key_id,
     )
     .await;
 

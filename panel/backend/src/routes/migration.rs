@@ -245,6 +245,7 @@ pub async fn analyze(
     let migration_id = migration.id;
     let user_id = claims.sub;
     let email = claims.email.clone();
+    let key_id = claims.key_id;
     let path_owned = resolved_path.clone();
     let source_owned = source.to_string();
 
@@ -331,6 +332,7 @@ pub async fn analyze(
                     Some(&path_owned),
                     Some(&source_owned),
                     None,
+                    key_id,
                 )
                 .await;
             }
@@ -597,6 +599,7 @@ pub async fn import(
     let jwt_secret = state.config.jwt_secret.clone();
     let user_id = claims.sub;
     let email = claims.email.clone();
+    let key_id = claims.key_id;
     let agent_migration_id = agent_migration_id.clone();
     let migration_source = migration.source.clone();
     // The imported domains are client-supplied (`ImportSiteItem.domain`) and are
@@ -1237,6 +1240,7 @@ pub async fn import(
             Some(&migration_source),
             None,
             None,
+            key_id,
         )
         .await;
 
@@ -1407,6 +1411,7 @@ pub async fn remove(
         None,
         None,
         None,
+        claims.key_id,
     )
     .await;
 

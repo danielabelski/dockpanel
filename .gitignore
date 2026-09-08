@@ -2,6 +2,7 @@
 panel/agent/target/
 panel/backend/target/
 panel/cli/target/
+panel/mcp/target/
 
 # Node.js
 panel/frontend/node_modules/

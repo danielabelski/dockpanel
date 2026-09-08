@@ -94,12 +94,13 @@ echo "Version check:"
 V_AGENT=$(grep '^version' panel/agent/Cargo.toml 2>/dev/null | head -1 | sed 's/.*"\(.*\)"/\1/')
 V_BACKEND=$(grep '^version' panel/backend/Cargo.toml 2>/dev/null | head -1 | sed 's/.*"\(.*\)"/\1/')
 V_CLI=$(grep '^version' panel/cli/Cargo.toml 2>/dev/null | head -1 | sed 's/.*"\(.*\)"/\1/')
+V_MCP=$(grep '^version' panel/mcp/Cargo.toml 2>/dev/null | head -1 | sed 's/.*"\(.*\)"/\1/')
 V_FRONTEND=$(grep '"version"' panel/frontend/package.json 2>/dev/null | head -1 | sed 's/.*: *"\(.*\)".*/\1/')
 LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "none")
 
-echo "  agent=$V_AGENT backend=$V_BACKEND cli=$V_CLI frontend=$V_FRONTEND tag=$LATEST_TAG"
+echo "  agent=$V_AGENT backend=$V_BACKEND cli=$V_CLI mcp=$V_MCP frontend=$V_FRONTEND tag=$LATEST_TAG"
 
-if [ "$V_AGENT" != "$V_BACKEND" ] || [ "$V_AGENT" != "$V_CLI" ] || [ "$V_AGENT" != "$V_FRONTEND" ]; then
+if [ "$V_AGENT" != "$V_BACKEND" ] || [ "$V_AGENT" != "$V_CLI" ] || [ "$V_AGENT" != "$V_MCP" ] || [ "$V_AGENT" != "$V_FRONTEND" ]; then
   echo -e "${RED}Version mismatch between packages!${NC}"
   ISSUES=$((ISSUES + 1))
 fi

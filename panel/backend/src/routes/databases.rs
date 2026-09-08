@@ -1040,7 +1040,7 @@ pub async fn update_pitr_config(
     crate::services::activity::log_activity(
         &state.db, claims.sub, &claims.email,
         if enabled { "database.pitr_enabled" } else { "database.pitr_disabled" },
-        Some("database"), Some(&name), None, None,
+        Some("database"), Some(&name), None, None, claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -1133,7 +1133,7 @@ pub async fn reset_password(
     let ip = crate::routes::client_ip(&headers);
     crate::services::activity::log_activity(
         &state.db, claims.sub, &claims.email, "database.password_reset",
-        Some("database"), Some(&name), None, ip.as_deref(),
+        Some("database"), Some(&name), None, ip.as_deref(), claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db,
@@ -1145,6 +1145,7 @@ pub async fn reset_password(
         None,
         None,
         "warning",
+        claims.key_id,
     ).await;
 
     tracing::info!("Database password reset: {name}");
@@ -1357,7 +1358,7 @@ pub async fn import(
     let ip = crate::routes::client_ip(&headers);
     crate::services::activity::log_activity_on_server(
         &state.db, claims.sub, &claims.email, "database.import",
-        Some("database"), Some(&name), Some(filename), ip.as_deref(), site_server_id,
+        Some("database"), Some(&name), Some(filename), ip.as_deref(), site_server_id, claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db,
@@ -1369,6 +1370,7 @@ pub async fn import(
         Some(filename),
         None,
         "info",
+        claims.key_id,
     ).await;
 
     crate::services::extensions::fire_event(&state.db, "database.imported", serde_json::json!({

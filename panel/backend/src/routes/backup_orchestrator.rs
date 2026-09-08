@@ -731,7 +731,7 @@ pub async fn create_policy(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "backup_policy.create",
-        Some("backup_policy"), Some(&req.name), None, None,
+        Some("backup_policy"), Some(&req.name), None, None, claims.key_id,
     ).await;
 
     fire_event(&state.db, "backup_policy.created", serde_json::json!({
@@ -874,7 +874,7 @@ pub async fn protect_all(
 
     activity::log_activity(
         db, claims.sub, &claims.email, "backup_policy.protect_all",
-        Some("backup_policy"), Some(policy_name), None, None,
+        Some("backup_policy"), Some(policy_name), None, None, claims.key_id,
     ).await;
 
     fire_event(db, "backup_policy.created", serde_json::json!({
@@ -993,7 +993,7 @@ pub async fn create_db_backup(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "db_backup.create",
-        Some("database"), Some(&db_name), Some(&filename), None,
+        Some("database"), Some(&db_name), Some(&filename), None, claims.key_id,
     ).await;
 
     fire_event(&state.db, "db_backup.created", serde_json::json!({
@@ -1182,7 +1182,7 @@ pub async fn restore_db_backup(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "db_backup.restore",
-        Some("database"), Some(&backup.db_name), Some(&backup.filename), ip.as_deref(),
+        Some("database"), Some(&backup.db_name), Some(&backup.filename), ip.as_deref(), claims.key_id,
     ).await;
 
     crate::services::security_hardening::audit_log(
@@ -1195,6 +1195,7 @@ pub async fn restore_db_backup(
         Some(&backup.filename),
         None,
         "info",
+        claims.key_id,
     ).await;
 
     fire_event(&state.db, "db_backup.restored", serde_json::json!({
@@ -1266,7 +1267,7 @@ pub async fn create_volume_backup(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "volume_backup.create",
-        Some("volume"), Some(&req.container_name), Some(&filename), None,
+        Some("volume"), Some(&req.container_name), Some(&filename), None, claims.key_id,
     ).await;
 
     Ok((StatusCode::CREATED, Json(serde_json::json!({
@@ -1386,7 +1387,7 @@ pub async fn restore_volume_backup(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "volume_backup.restore",
-        Some("volume"), Some(&backup.container_name), Some(&backup.filename), ip.as_deref(),
+        Some("volume"), Some(&backup.container_name), Some(&backup.filename), ip.as_deref(), claims.key_id,
     ).await;
 
     crate::services::security_hardening::audit_log(
@@ -1399,6 +1400,7 @@ pub async fn restore_volume_backup(
         Some(&backup.filename),
         None,
         "info",
+        claims.key_id,
     ).await;
 
     fire_event(&state.db, "volume_backup.restored", serde_json::json!({

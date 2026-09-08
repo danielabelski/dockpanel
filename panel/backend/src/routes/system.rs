@@ -227,7 +227,7 @@ pub async fn diagnostics_fix(
 
         activity::log_activity_on_server(
             &state.db, claims.sub, &claims.email, "diagnostics.fix",
-            Some("renew-ssl"), Some(domain), None, None, Some(server_id),
+            Some("renew-ssl"), Some(domain), None, None, Some(server_id), claims.key_id,
         ).await;
 
         // The shape the Diagnostics screen reads.
@@ -248,7 +248,7 @@ pub async fn diagnostics_fix(
     };
     activity::log_activity_on_server(
         &state.db, claims.sub, &claims.email, "diagnostics.fix",
-        Some(&action), target.as_deref(), None, None, Some(server_id),
+        Some(&action), target.as_deref(), None, None, Some(server_id), claims.key_id,
     ).await;
 
     Ok(Json(data))
@@ -280,7 +280,7 @@ pub async fn disk_cleanup(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "system.cleanup",
-        None, None, None, None,
+        None, None, None, None, claims.key_id,
     ).await;
 
     Ok(Json(data))
@@ -300,7 +300,7 @@ pub async fn change_hostname(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "system.hostname_change",
-        None, None, None, None,
+        None, None, None, None, claims.key_id,
     ).await;
 
     Ok(Json(data))
@@ -362,6 +362,7 @@ pub async fn updates_apply(
     let db = state.db.clone();
     let email = claims.email.clone();
     let user_id = claims.sub;
+    let key_id = claims.key_id;
 
     tokio::spawn(async move {
         let emit = |step: &str, label: &str, status: &str, msg: Option<String>| {
@@ -441,7 +442,7 @@ pub async fn updates_apply(
         {
             Ok(()) => {
                 activity::log_activity(&db, user_id, &email, "system.updates.apply",
-                    Some("system"), Some("packages"), None, None).await;
+                    Some("system"), Some("packages"), None, None, key_id).await;
             }
             Err(e) => {
                 emit("update", "Failed to apply updates", "error", Some(format!("{e}")));
@@ -485,7 +486,7 @@ pub async fn system_reboot(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "system.reboot",
-        Some("system"), Some("server"), None, None,
+        Some("system"), Some("server"), None, None, claims.key_id,
     ).await;
 
     Ok(Json(data))
@@ -608,7 +609,7 @@ pub(crate) async fn install_service_with_log(
                 // worth finding later.
                 activity::log_activity(
                     &db, claims_sub, &email, "service.install",
-                    Some("system"), Some(&svc), None, None,
+                    Some("system"), Some(&svc), None, None, None,
                 ).await;
             }
             Err(e) => {
@@ -732,10 +733,10 @@ pub async fn add_ssh_key(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let result = agent.post("/ssh-keys", Some(body)).await.map_err(|e| agent_error("Add SSH key", e))?;
     let ip = crate::routes::client_ip(&headers);
-    activity::log_activity(&state.db, claims.sub, &claims.email, "ssh.key.add", Some("system"), None, None, ip.as_deref()).await;
+    activity::log_activity(&state.db, claims.sub, &claims.email, "ssh.key.add", Some("system"), None, None, ip.as_deref(), claims.key_id).await;
     crate::services::security_hardening::audit_log(
         &state.db, "ssh.key.add", Some(&claims.email), ip.as_deref(),
-        Some("system"), None, None, None, "warning",
+        Some("system"), None, None, None, "warning", claims.key_id,
     ).await;
     Ok(Json(result))
 }
@@ -749,10 +750,10 @@ pub async fn remove_ssh_key(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let result = agent.delete(&format!("/ssh-keys/{fingerprint}")).await.map_err(|e| agent_error("Remove SSH key", e))?;
     let ip = crate::routes::client_ip(&headers);
-    activity::log_activity(&state.db, claims.sub, &claims.email, "ssh.key.remove", Some("system"), None, None, ip.as_deref()).await;
+    activity::log_activity(&state.db, claims.sub, &claims.email, "ssh.key.remove", Some("system"), None, None, ip.as_deref(), claims.key_id).await;
     crate::services::security_hardening::audit_log(
         &state.db, "ssh.key.remove", Some(&claims.email), ip.as_deref(),
-        Some("system"), None, None, None, "warning",
+        Some("system"), None, None, None, "warning", claims.key_id,
     ).await;
     Ok(Json(result))
 }
@@ -774,7 +775,7 @@ pub async fn enable_auto_updates(
     ServerScope(_server_id, agent): ServerScope,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let result = agent.post("/auto-updates/enable", None).await.map_err(|e| agent_error("Enable auto-updates", e))?;
-    activity::log_activity(&state.db, claims.sub, &claims.email, "auto-updates.enable", Some("system"), None, None, None).await;
+    activity::log_activity(&state.db, claims.sub, &claims.email, "auto-updates.enable", Some("system"), None, None, None, claims.key_id).await;
     Ok(Json(result))
 }
 
@@ -784,7 +785,7 @@ pub async fn disable_auto_updates(
     ServerScope(_server_id, agent): ServerScope,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let result = agent.post("/auto-updates/disable", None).await.map_err(|e| agent_error("Disable auto-updates", e))?;
-    activity::log_activity(&state.db, claims.sub, &claims.email, "auto-updates.disable", Some("system"), None, None, None).await;
+    activity::log_activity(&state.db, claims.sub, &claims.email, "auto-updates.disable", Some("system"), None, None, None, claims.key_id).await;
     Ok(Json(result))
 }
 
@@ -857,6 +858,7 @@ pub async fn install_powerdns(
     let jwt_secret = state.config.jwt_secret.clone();
     let user_id = claims.sub;
     let email = claims.email.clone();
+    let key_id = claims.key_id;
     let ip = crate::routes::client_ip(&headers);
 
     tokio::spawn(async move {
@@ -909,11 +911,11 @@ pub async fn install_powerdns(
                 emit("complete", "PowerDNS installed", "done", None);
                 activity::log_activity(
                     &db, user_id, &email, "service.install",
-                    Some("system"), Some("powerdns"), None, ip.as_deref(),
+                    Some("system"), Some("powerdns"), None, ip.as_deref(), key_id,
                 ).await;
                 crate::services::security_hardening::audit_log(
                     &db, "service.install", Some(&email), ip.as_deref(),
-                    Some("system"), Some("powerdns"), None, None, "warning",
+                    Some("system"), Some("powerdns"), None, None, "warning", key_id,
                 ).await;
                 tracing::info!("Service installed: PowerDNS");
             }
@@ -1065,6 +1067,7 @@ pub async fn uninstall_powerdns(
     let db = state.db.clone();
     let user_id = claims.sub;
     let email = claims.email.clone();
+    let key_id = claims.key_id;
     let ip = crate::routes::client_ip(&headers);
 
     tokio::spawn(async move {
@@ -1114,11 +1117,11 @@ pub async fn uninstall_powerdns(
                 emit("complete", "PowerDNS uninstalled", "done", None);
                 activity::log_activity(
                     &db, user_id, &email, "service.uninstall",
-                    Some("system"), Some("powerdns"), None, ip.as_deref(),
+                    Some("system"), Some("powerdns"), None, ip.as_deref(), key_id,
                 ).await;
                 crate::services::security_hardening::audit_log(
                     &db, "service.uninstall", Some(&email), ip.as_deref(),
-                    Some("system"), Some("powerdns"), None, None, "warning",
+                    Some("system"), Some("powerdns"), None, None, "warning", key_id,
                 ).await;
                 tracing::info!("Service uninstalled: PowerDNS");
             }
@@ -1199,10 +1202,10 @@ pub async fn traefik_install(
         .execute(&state.db).await.ok();
 
     let ip = crate::routes::client_ip(&headers);
-    activity::log_activity(&state.db, claims.sub, &claims.email, "traefik.install", Some("system"), None, None, ip.as_deref()).await;
+    activity::log_activity(&state.db, claims.sub, &claims.email, "traefik.install", Some("system"), None, None, ip.as_deref(), claims.key_id).await;
     crate::services::security_hardening::audit_log(
         &state.db, "traefik.install", Some(&claims.email), ip.as_deref(),
-        Some("system"), None, None, None, "warning",
+        Some("system"), None, None, None, "warning", claims.key_id,
     ).await;
 
     Ok(Json(result))
@@ -1225,10 +1228,10 @@ pub async fn traefik_uninstall(
         .execute(&state.db).await.ok();
 
     let ip = crate::routes::client_ip(&headers);
-    activity::log_activity(&state.db, claims.sub, &claims.email, "traefik.uninstall", Some("system"), None, None, ip.as_deref()).await;
+    activity::log_activity(&state.db, claims.sub, &claims.email, "traefik.uninstall", Some("system"), None, None, ip.as_deref(), claims.key_id).await;
     crate::services::security_hardening::audit_log(
         &state.db, "traefik.uninstall", Some(&claims.email), ip.as_deref(),
-        Some("system"), None, None, None, "warning",
+        Some("system"), None, None, None, "warning", claims.key_id,
     ).await;
 
     Ok(Json(result))

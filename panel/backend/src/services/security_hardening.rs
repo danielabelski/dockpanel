@@ -10,6 +10,7 @@
 use sqlx::PgPool;
 use std::sync::OnceLock;
 use std::time::Duration;
+use uuid::Uuid;
 
 /// Shared HTTP client for geo-IP lookups (reuses connections).
 fn geo_client() -> &'static reqwest::Client {
@@ -83,6 +84,7 @@ pub async fn lookup_geo_ip(ip: &str) -> Option<GeoInfo> {
 
 /// Write to the immutable security audit log.
 /// This table has a PostgreSQL trigger preventing UPDATE/DELETE.
+#[allow(clippy::too_many_arguments)]
 pub async fn audit_log(
     pool: &PgPool,
     event_type: &str,
@@ -93,6 +95,7 @@ pub async fn audit_log(
     details: Option<&str>,
     geo: Option<&GeoInfo>,
     severity: &str,
+    api_key_id: Option<Uuid>,
 ) {
     let (country, city, isp) = geo.map(|g| {
         (Some(g.country.as_str()), Some(g.city.as_str()), Some(g.isp.as_str()))
@@ -101,8 +104,8 @@ pub async fn audit_log(
     if let Err(e) = sqlx::query(
         "INSERT INTO security_audit_log \
          (event_type, actor_email, actor_ip, target_type, target_name, details, \
-          geo_country, geo_city, geo_isp, severity) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"
+          geo_country, geo_city, geo_isp, severity, api_key_id) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
     )
     .bind(event_type)
     .bind(actor_email)
@@ -114,6 +117,7 @@ pub async fn audit_log(
     .bind(city)
     .bind(isp)
     .bind(severity)
+    .bind(api_key_id)
     .execute(pool)
     .await {
         tracing::warn!("Failed to write security audit log: {e}");
@@ -242,6 +246,7 @@ pub async fn record_suspicious_event_at(
                 pool, "lockdown.auto", None, None,
                 Some("system"), None,
                 Some(&reason), None, "critical",
+                None,
             ).await;
 
             return true;

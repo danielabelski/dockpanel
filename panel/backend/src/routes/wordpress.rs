@@ -229,6 +229,7 @@ pub async fn install(
         Some(&domain),
         None,
         None,
+        claims.key_id,
     )
     .await;
 
@@ -296,6 +297,7 @@ pub async fn update(
         Some(&domain),
         None,
         None,
+        claims.key_id,
     )
     .await;
 
@@ -525,7 +527,7 @@ pub async fn vuln_scan(
 
     crate::services::activity::log_activity(
         &state.db, claims.sub, &claims.email, "wordpress.vuln_scan",
-        Some("site"), Some(&site.domain), None, None,
+        Some("site"), Some(&site.domain), None, None, claims.key_id,
     ).await;
 
     Ok(Json(result))
@@ -660,6 +662,7 @@ pub async fn wp_harden(
         Some(&site.domain),
         None,
         None,
+        claims.key_id,
     )
     .await;
 
@@ -688,7 +691,7 @@ pub async fn update_safe(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email,
-        action, Some("site"), Some(&domain), None, None,
+        action, Some("site"), Some(&domain), None, None, claims.key_id,
     ).await;
 
     Ok(Json(result))

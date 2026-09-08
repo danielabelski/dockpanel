@@ -1261,6 +1261,7 @@ async fn renew_stack_certificate(pool: &PgPool, member: &FleetMember, domain: &s
         Some(&format!("stack_id={stack_id}, success={success}, result={details}")),
         None,
         Some(member.id),
+        None,
     )
     .await;
 
@@ -1552,6 +1553,7 @@ async fn renew_docker_app_certificate(pool: &PgPool, member: &FleetMember, domai
         Some(&format!("app_id={app_id}, success={success}, result={details}")),
         None,
         Some(member.id),
+        None,
     )
     .await;
 

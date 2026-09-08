@@ -209,7 +209,7 @@ pub async fn create(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "incident.create",
-        Some("incident"), Some(&req.title), None, None,
+        Some("incident"), Some(&req.title), None, None, claims.key_id,
     ).await;
 
     fire_event(&state.db, "incident.created", serde_json::json!({

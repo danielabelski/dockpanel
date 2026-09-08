@@ -389,11 +389,11 @@ pub async fn callback(
                 let ip = crate::routes::client_ip(&headers);
                 activity::log_activity(
                     &state.db, u.id, &u.email, "auth.oauth_link",
-                    Some("user"), Some(&provider_name), None, ip.as_deref(),
+                    Some("user"), Some(&provider_name), None, ip.as_deref(), None,
                 ).await;
                 crate::services::security_hardening::audit_log(
                     &state.db, "auth.oauth_link", Some(&u.email), ip.as_deref(),
-                    Some("user"), Some(&provider_name), None, None, "info",
+                    Some("user"), Some(&provider_name), None, None, "info", None,
                 ).await;
                 u.oauth_provider = Some(provider_name.clone());
             } else if u.oauth_provider.as_deref() != Some(provider_name.as_str()) {
@@ -497,11 +497,11 @@ pub async fn callback(
             let ip = crate::routes::client_ip(&headers);
             activity::log_activity(
                 &state.db, new_user.id, &new_user.email, "auth.oauth_register",
-                Some("user"), Some(&provider_name), None, ip.as_deref(),
+                Some("user"), Some(&provider_name), None, ip.as_deref(), None,
             ).await;
             crate::services::security_hardening::audit_log(
                 &state.db, "auth.oauth_register", Some(&new_user.email), ip.as_deref(),
-                Some("user"), Some(&provider_name), None, None, "info",
+                Some("user"), Some(&provider_name), None, None, "info", None,
             ).await;
             new_user
         }
@@ -560,7 +560,7 @@ pub async fn callback(
 
         crate::services::activity::log_activity(
             &state.db, user.id, &user.email, "auth.oauth_login_2fa_required",
-            Some("user"), Some(&provider_name), None, None,
+            Some("user"), Some(&provider_name), None, None, None,
         ).await;
 
         // Redirect to frontend 2FA page with temp token
@@ -583,6 +583,7 @@ pub async fn callback(
         iat: now,
         exp: now + 7200, // 2 hours
         jti: Some(jti.clone()),
+        key_id: None,
     };
 
     let token = jsonwebtoken::encode(
@@ -609,11 +610,11 @@ pub async fn callback(
 
     crate::services::activity::log_activity(
         &state.db, user.id, &user.email, "auth.oauth_login",
-        Some("user"), Some(&provider_name), None, ip.as_deref(),
+        Some("user"), Some(&provider_name), None, ip.as_deref(), None,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, "auth.oauth_login", Some(&user.email), ip.as_deref(),
-        Some("user"), Some(&provider_name), None, None, "info",
+        Some("user"), Some(&provider_name), None, None, "info", None,
     ).await;
 
     // Set cookie and redirect to dashboard.

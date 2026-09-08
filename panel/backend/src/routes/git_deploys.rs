@@ -765,7 +765,7 @@ pub async fn create(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "git_deploy.create",
-        Some("git_deploy"), Some(&body.name), None, None,
+        Some("git_deploy"), Some(&body.name), None, None, claims.key_id,
     ).await;
 
     // GAP 13: Auto-create webhook gateway endpoint for this git deploy
@@ -1181,6 +1181,7 @@ pub async fn update(
             Some(&format!("Deploy approval requirement {verb}")),
             None,
             severity,
+            claims.key_id,
         )
         .await;
     }
@@ -1352,7 +1353,7 @@ pub async fn remove(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "git_deploy.remove",
-        Some("git_deploy"), Some(&name), None, ip.as_deref(),
+        Some("git_deploy"), Some(&name), None, ip.as_deref(), claims.key_id,
     ).await;
 
     crate::services::security_hardening::audit_log(
@@ -1365,6 +1366,7 @@ pub async fn remove(
         None,
         None,
         "warning",
+        claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -1654,7 +1656,7 @@ pub async fn explain_history(
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "git_deploy.ai_explain",
         Some("git_deploy"), Some(&ctx.site_name),
-        Some(&format!("history={history_id} provider={}", config.provider)), None,
+        Some(&format!("history={history_id} provider={}", config.provider)), None, claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({
@@ -1732,6 +1734,7 @@ pub async fn rollback(
     let db = state.db.clone();
     let user_id = claims.sub;
     let email = claims.email.clone();
+    let key_id = claims.key_id;
     let deploy_name = config.name.clone();
     let rollback_image = hist.image_tag.clone();
     let rollback_commit = hist.commit_hash.clone();
@@ -1864,7 +1867,7 @@ pub async fn rollback(
                 tracing::info!("Git deploy rollback success: {deploy_name} → {rollback_image}");
                 activity::log_activity(
                     &db, user_id, &email, "git_deploy.rollback",
-                    Some("git_deploy"), Some(&deploy_name), Some(&rollback_image), None,
+                    Some("git_deploy"), Some(&deploy_name), Some(&rollback_image), None, key_id,
                 ).await;
 
                 // Panel notification
@@ -2597,7 +2600,7 @@ fn spawn_deploy_task(
                     }
 
                     tracing::info!("Git deploy (compose) success: {deploy_name} ({commit_hash})");
-                    crate::services::activity::log_activity(&db, user_id, &email, "git_deploy.compose", Some("git_deploy"), Some(&deploy_name), Some(&commit_hash), Some("success")).await;
+                    crate::services::activity::log_activity(&db, user_id, &email, "git_deploy.compose", Some("git_deploy"), Some(&deploy_name), Some(&commit_hash), Some("success"), None).await;
                 }
                 Err(e) => {
                     emit("compose", "Docker Compose deploy failed", "error", Some(format!("{e}")));
@@ -2924,7 +2927,7 @@ fn spawn_deploy_task(
                 tracing::info!("Git deploy success: {deploy_name} ({commit_hash})");
                 activity::log_activity(
                     &db, user_id, &email, "git_deploy.deploy",
-                    Some("git_deploy"), Some(&deploy_name), Some(&commit_hash), Some("success"),
+                    Some("git_deploy"), Some(&deploy_name), Some(&commit_hash), Some("success"), None,
                 ).await;
 
                 // Panel notification
@@ -3135,7 +3138,7 @@ fn spawn_deploy_task(
 
                                             activity::log_activity(
                                                 &monitor_db, monitor_user, &monitor_email_str, "git_deploy.auto_rollback",
-                                                Some("git_deploy"), Some(&monitor_name), Some(&prev_commit), None,
+                                                Some("git_deploy"), Some(&monitor_name), Some(&prev_commit), None, None,
                                             ).await;
 
                                             // Panel notification
@@ -3186,7 +3189,7 @@ fn spawn_deploy_task(
                 tracing::error!("Git deploy failed: {deploy_name}: {e}");
                 activity::log_activity(
                     &db, user_id, &email, "git_deploy.deploy",
-                    Some("git_deploy"), Some(&deploy_name), Some(&commit_hash), Some("failed"),
+                    Some("git_deploy"), Some(&deploy_name), Some(&commit_hash), Some("failed"), None,
                 ).await;
 
                 // Panel notification
@@ -3704,7 +3707,7 @@ pub async fn trigger_deploy_task(
                         tracing::warn!("Failed to update git deploy status: {db_err}");
                     }
                     tracing::info!("Deploy success (compose/{}): {} ({commit_hash})", triggered_by, config.name);
-                    crate::services::activity::log_activity(&db, user_id, &email, "git_deploy.compose", Some("git_deploy"), Some(&config.name), Some(&commit_hash), Some(&triggered_by)).await;
+                    crate::services::activity::log_activity(&db, user_id, &email, "git_deploy.compose", Some("git_deploy"), Some(&config.name), Some(&commit_hash), Some(&triggered_by), None).await;
                 }
                 Err(e) => {
                     tracing::error!("Compose deploy failed ({}): {}: {e}", triggered_by, config.name);
@@ -3931,7 +3934,7 @@ pub async fn trigger_deploy_task(
             }
 
             tracing::info!("Deploy success ({}): {} ({commit_hash})", triggered_by, config.name);
-            crate::services::activity::log_activity(&db, user_id, &email, "git_deploy.deploy", Some("git_deploy"), Some(&config.name), Some(&commit_hash), Some(&triggered_by)).await;
+            crate::services::activity::log_activity(&db, user_id, &email, "git_deploy.deploy", Some("git_deploy"), Some(&config.name), Some(&commit_hash), Some(&triggered_by), None).await;
 
             // Post-deploy health check: verify site is responding
             if let Some(ref domain) = config.domain {
@@ -4491,7 +4494,7 @@ pub async fn schedule_deploy(
     tracing::info!("Scheduled one-time deploy for git deploy {id} at {scheduled_at}");
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "git_deploy.schedule",
-        Some("git_deploy"), Some(&id.to_string()), Some(deploy_at), None,
+        Some("git_deploy"), Some(&id.to_string()), Some(deploy_at), None, claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({

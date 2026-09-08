@@ -172,11 +172,11 @@ pub async fn create(
         );
         activity::log_activity(
             &state.db, claims.sub, &claims.email, "reseller.create",
-            Some("reseller"), Some(&email), None, ip.as_deref(),
+            Some("reseller"), Some(&email), None, ip.as_deref(), claims.key_id,
         ).await;
         crate::services::security_hardening::audit_log(
             &state.db, "reseller.create", Some(&claims.email), ip.as_deref(),
-            Some("reseller"), Some(&email), None, None, "warning",
+            Some("reseller"), Some(&email), None, None, "warning", claims.key_id,
         ).await;
         return Ok((
             StatusCode::CREATED,
@@ -204,11 +204,11 @@ pub async fn create(
     tracing::info!("User promoted to reseller by {}: {}", claims.email, email);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "reseller.create",
-        Some("reseller"), Some(&email), None, ip.as_deref(),
+        Some("reseller"), Some(&email), None, ip.as_deref(), claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, "reseller.create", Some(&claims.email), ip.as_deref(),
-        Some("reseller"), Some(&email), None, None, "warning",
+        Some("reseller"), Some(&email), None, None, "warning", claims.key_id,
     ).await;
 
     Ok((
@@ -293,7 +293,7 @@ pub async fn update(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "reseller.update",
-        Some("reseller"), Some(&user_email.0), None, None,
+        Some("reseller"), Some(&user_email.0), None, None, claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -359,11 +359,11 @@ pub async fn remove(
     let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "reseller.delete",
-        Some("reseller"), Some(&user_email.0), None, ip.as_deref(),
+        Some("reseller"), Some(&user_email.0), None, ip.as_deref(), claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, "reseller.delete", Some(&claims.email), ip.as_deref(),
-        Some("reseller"), Some(&user_email.0), None, None, "warning",
+        Some("reseller"), Some(&user_email.0), None, None, "warning", claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true, "email": user_email.0 })))
@@ -439,11 +439,11 @@ pub async fn allocate_server(
     let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "reseller.server.allocate",
-        Some("server"), Some(&server_name), None, ip.as_deref(),
+        Some("server"), Some(&server_name), None, ip.as_deref(), claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, "reseller.server.allocate", Some(&claims.email), ip.as_deref(),
-        Some("server"), Some(&server_name), None, None, "warning",
+        Some("server"), Some(&server_name), None, None, "warning", claims.key_id,
     ).await;
 
     Ok((
@@ -494,11 +494,11 @@ pub async fn deallocate_server(
     let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "reseller.server.deallocate",
-        Some("server"), Some(&server_id.to_string()), None, ip.as_deref(),
+        Some("server"), Some(&server_id.to_string()), None, ip.as_deref(), claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, "reseller.server.deallocate", Some(&claims.email), ip.as_deref(),
-        Some("server"), Some(&server_id.to_string()), None, None, "info",
+        Some("server"), Some(&server_id.to_string()), None, None, "info", claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))

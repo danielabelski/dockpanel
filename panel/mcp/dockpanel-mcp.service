@@ -1,0 +1,50 @@
+[Unit]
+Description=DockPanel MCP Server
+# Wants=, not Requires=: dockpanel-mcp calls the API over loopback HTTP exactly
+# like the CLI does, so it can start (and fail its own health checks cleanly)
+# even on a box where the API unit is momentarily down, same tolerance the
+# agent unit already gives nginx/docker.
+After=network.target dockpanel-api.service
+Wants=dockpanel-api.service
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/dockpanel-mcp
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info
+# Optional — LISTEN_ADDR= only; absent file or key falls back to
+# 127.0.0.1:3081 (see panel/mcp/src/main.rs::listen_addr). The `-` prefix
+# means "read it if it exists", same convention as the agent unit's
+# EnvironmentFile= for agent.env.
+EnvironmentFile=-/etc/dockpanel/mcp.env
+
+# This process makes exactly one kind of I/O: reading two small config files
+# under /etc/dockpanel and issuing outbound HTTP to the panel API over
+# loopback. It writes nothing to disk, so unlike the agent (which reconfigures
+# nginx, issues certs, edits crontabs) it needs none of the ReadWritePaths
+# exceptions that unit carries — ProtectSystem=strict with an EMPTY
+# ReadWritePaths is the correct, narrowest sandbox in this codebase, not an
+# oversight.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictNamespaces=~user
+
+MemoryMax=256M
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

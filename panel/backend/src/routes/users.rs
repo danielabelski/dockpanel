@@ -170,10 +170,12 @@ pub async fn create(
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "user.create",
         Some("user"), Some(&user.email), Some(role), ip.as_deref(),
+        claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, "user.create", Some(&claims.email), ip.as_deref(),
         Some("user"), Some(&user.email), Some(role), None, "warning",
+        claims.key_id,
     ).await;
 
     // GAP 42: Send welcome email (best-effort, skip silently if SMTP not configured)
@@ -304,10 +306,12 @@ pub async fn update(
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "user.update",
         Some("user"), Some(&_user.email), None, ip.as_deref(),
+        claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, "user.update", Some(&claims.email), ip.as_deref(),
         Some("user"), Some(&_user.email), None, None, "warning",
+        claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -386,10 +390,12 @@ pub async fn toggle_suspend(
     activity::log_activity(
         &state.db, claims.sub, &claims.email, action,
         Some("user"), Some(&user.email), Some(&new_role), ip.as_deref(),
+        claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, action, Some(&claims.email), ip.as_deref(),
         Some("user"), Some(&user.email), Some(&new_role), None, "warning",
+        claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({
@@ -466,10 +472,12 @@ pub async fn reset_password(
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "user.reset_password",
         Some("user"), Some(&user.email), None, ip.as_deref(),
+        claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, "user.reset_password", Some(&claims.email), ip.as_deref(),
         Some("user"), Some(&user.email), None, None, "warning",
+        claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true, "email": user.email })))
@@ -548,10 +556,12 @@ pub async fn reset_2fa(
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "user.reset_2fa",
         Some("user"), Some(&user.email), None, ip.as_deref(),
+        claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, "user.reset_2fa", Some(&claims.email), ip.as_deref(),
         Some("user"), Some(&user.email), None, None, "warning",
+        claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true, "email": user.email })))
@@ -685,10 +695,12 @@ pub async fn remove(
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "user.delete",
         Some("user"), Some(&user.email), details.as_deref(), ip.as_deref(),
+        claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, "user.delete", Some(&claims.email), ip.as_deref(),
         Some("user"), Some(&user.email), details.as_deref(), None, "warning",
+        claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({

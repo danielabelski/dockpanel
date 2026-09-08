@@ -120,6 +120,7 @@ pub async fn mail_install(
     let sync_state = state.clone();
     let user_id = claims.sub;
     let email = claims.email.clone();
+    let key_id = claims.key_id;
 
     tokio::spawn(async move {
         let emit = |step: &str, label: &str, status: &str, msg: Option<String>| {
@@ -188,7 +189,7 @@ pub async fn mail_install(
                 emit("complete", "Mail server installed", "done", None);
                 activity::log_activity(
                     &db, user_id, &email, "mail.server.install",
-                    Some("mail"), None, None, None,
+                    Some("mail"), None, None, None, key_id,
                 ).await;
                 tracing::info!("Mail server installed");
             }
@@ -229,6 +230,7 @@ pub async fn mail_uninstall(
     let db = state.db.clone();
     let user_id = claims.sub;
     let email = claims.email.clone();
+    let key_id = claims.key_id;
 
     tokio::spawn(async move {
         let emit = |step: &str, label: &str, status: &str, msg: Option<String>| {
@@ -251,7 +253,7 @@ pub async fn mail_uninstall(
                 emit("complete", "Mail server uninstalled", "done", None);
                 activity::log_activity(
                     &db, user_id, &email, "mail.server.uninstall",
-                    Some("mail"), None, None, None,
+                    Some("mail"), None, None, None, key_id,
                 ).await;
                 tracing::info!("Mail server uninstalled");
             }
@@ -474,7 +476,7 @@ pub async fn create_domain(
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "mail.domain.create",
         Some("mail"), Some(&domain),
-        grantee.as_ref().map(|(w,)| w.as_str()), ip.as_deref(),
+        grantee.as_ref().map(|(w,)| w.as_str()), ip.as_deref(), claims.key_id,
     ).await;
 
     crate::services::security_hardening::audit_log(
@@ -487,6 +489,7 @@ pub async fn create_domain(
         grantee.as_ref().map(|(w,)| w.as_str()),
         None,
         "warning",
+        claims.key_id,
     ).await;
 
     Ok((StatusCode::CREATED, Json(mail_domain)))
@@ -533,7 +536,7 @@ pub async fn update_domain(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "mail.domain.update",
-        Some("mail"), Some(&domain), None, None,
+        Some("mail"), Some(&domain), None, None, claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -596,7 +599,7 @@ pub async fn delete_domain(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "mail.domain.delete",
-        Some("mail"), Some(&domain), None, ip.as_deref(),
+        Some("mail"), Some(&domain), None, ip.as_deref(), claims.key_id,
     ).await;
 
     crate::services::security_hardening::audit_log(
@@ -609,6 +612,7 @@ pub async fn delete_domain(
         None,
         None,
         "warning",
+        claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -775,7 +779,7 @@ pub async fn create_account(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "mail.account.create",
-        Some("mail"), Some(&email), None, None,
+        Some("mail"), Some(&email), None, None, claims.key_id,
     ).await;
 
     Ok((StatusCode::CREATED, Json(account)))
@@ -887,7 +891,7 @@ pub async fn update_account(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "mail.account.update",
-        Some("mail"), Some(&email), None, ip.as_deref(),
+        Some("mail"), Some(&email), None, ip.as_deref(), claims.key_id,
     ).await;
 
     crate::services::security_hardening::audit_log(
@@ -900,6 +904,7 @@ pub async fn update_account(
         None,
         None,
         "warning",
+        claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -930,7 +935,7 @@ pub async fn delete_account(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "mail.account.delete",
-        Some("mail"), Some(&email), None, ip.as_deref(),
+        Some("mail"), Some(&email), None, ip.as_deref(), claims.key_id,
     ).await;
 
     crate::services::security_hardening::audit_log(
@@ -943,6 +948,7 @@ pub async fn delete_account(
         None,
         None,
         "warning",
+        claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -1041,7 +1047,7 @@ pub async fn create_alias(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "mail.alias.create",
-        Some("mail"), Some(&alias.source_email), Some(&alias.destination_email), None,
+        Some("mail"), Some(&alias.source_email), Some(&alias.destination_email), None, claims.key_id,
     ).await;
 
     Ok((StatusCode::CREATED, Json(alias)))
@@ -1071,7 +1077,7 @@ pub async fn delete_alias(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "mail.alias.delete",
-        Some("mail"), Some(&source), None, None,
+        Some("mail"), Some(&source), None, None, claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -1107,7 +1113,7 @@ pub async fn flush_queue(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "mail.queue.flush",
-        Some("mail"), None, None, None,
+        Some("mail"), None, None, None, claims.key_id,
     ).await;
 
     Ok(Json(result))
@@ -1127,7 +1133,7 @@ pub async fn delete_queued(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "mail.queue.delete",
-        Some("mail"), Some(&queue_id), None, None,
+        Some("mail"), Some(&queue_id), None, None, claims.key_id,
     ).await;
 
     Ok(Json(result))
@@ -1697,7 +1703,7 @@ pub async fn rspamd_install(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     agent.post_long("/mail/rspamd/install", None, 900).await
         .map_err(|e| agent_error("Rspamd", e))?;
-    activity::log_activity(&state.db, claims.sub, &claims.email, "mail.rspamd_install", None, None, None, None).await;
+    activity::log_activity(&state.db, claims.sub, &claims.email, "mail.rspamd_install", None, None, None, None, claims.key_id).await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -1735,7 +1741,7 @@ pub async fn webmail_install(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let result = agent.post_long("/mail/webmail/install", Some(body), 900).await
         .map_err(|e| agent_error("Webmail", e))?;
-    activity::log_activity(&state.db, claims.sub, &claims.email, "mail.webmail_install", None, None, None, None).await;
+    activity::log_activity(&state.db, claims.sub, &claims.email, "mail.webmail_install", None, None, None, None, claims.key_id).await;
     Ok(Json(result))
 }
 
@@ -1758,7 +1764,7 @@ pub async fn webmail_remove(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     agent.post("/mail/webmail/remove", None).await
         .map_err(|e| agent_error("Webmail", e))?;
-    activity::log_activity(&state.db, claims.sub, &claims.email, "mail.webmail_remove", None, None, None, None).await;
+    activity::log_activity(&state.db, claims.sub, &claims.email, "mail.webmail_remove", None, None, None, None, claims.key_id).await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -1775,9 +1781,9 @@ pub async fn relay_configure(
     agent.post("/mail/relay/configure", Some(body)).await
         .map_err(|e| agent_error("SMTP relay", e))?;
     let ip = crate::routes::client_ip(&headers);
-    activity::log_activity(&state.db, claims.sub, &claims.email, "mail.relay_configure", None, None, None, ip.as_deref()).await;
+    activity::log_activity(&state.db, claims.sub, &claims.email, "mail.relay_configure", None, None, None, ip.as_deref(), claims.key_id).await;
     crate::services::security_hardening::audit_log(
-        &state.db, "mail.relay_configure", Some(&claims.email), ip.as_deref(), None, None, None, None, "warning",
+        &state.db, "mail.relay_configure", Some(&claims.email), ip.as_deref(), None, None, None, None, "warning", claims.key_id,
     ).await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -1801,7 +1807,7 @@ pub async fn relay_remove(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     agent.post("/mail/relay/remove", None).await
         .map_err(|e| agent_error("SMTP relay", e))?;
-    activity::log_activity(&state.db, claims.sub, &claims.email, "mail.relay_remove", None, None, None, None).await;
+    activity::log_activity(&state.db, claims.sub, &claims.email, "mail.relay_remove", None, None, None, None, claims.key_id).await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -2195,7 +2201,7 @@ pub async fn rate_limit_set(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     agent.post("/mail/rate-limit/set", Some(body)).await
         .map_err(|e| agent_error("Rate limit", e))?;
-    activity::log_activity(&state.db, claims.sub, &claims.email, "mail.rate_limit_set", None, None, None, None).await;
+    activity::log_activity(&state.db, claims.sub, &claims.email, "mail.rate_limit_set", None, None, None, None, claims.key_id).await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -2218,7 +2224,7 @@ pub async fn rate_limit_remove(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     agent.post("/mail/rate-limit/remove", None).await
         .map_err(|e| agent_error("Rate limit", e))?;
-    activity::log_activity(&state.db, claims.sub, &claims.email, "mail.rate_limit_remove", None, None, None, None).await;
+    activity::log_activity(&state.db, claims.sub, &claims.email, "mail.rate_limit_remove", None, None, None, None, claims.key_id).await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -2233,7 +2239,7 @@ pub async fn mailbox_backup(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let result = agent.post("/mail/backup", Some(body)).await
         .map_err(|e| agent_error("Mailbox backup", e))?;
-    activity::log_activity(&state.db, claims.sub, &claims.email, "mail.backup", None, None, None, None).await;
+    activity::log_activity(&state.db, claims.sub, &claims.email, "mail.backup", None, None, None, None, claims.key_id).await;
     Ok(Json(result))
 }
 
@@ -2246,7 +2252,7 @@ pub async fn mailbox_restore(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let result = agent.post("/mail/restore", Some(body)).await
         .map_err(|e| agent_error("Mailbox restore", e))?;
-    activity::log_activity(&state.db, claims.sub, &claims.email, "mail.restore", None, None, None, None).await;
+    activity::log_activity(&state.db, claims.sub, &claims.email, "mail.restore", None, None, None, None, claims.key_id).await;
     Ok(Json(result))
 }
 
@@ -2272,9 +2278,9 @@ pub async fn mailbox_backup_delete(
     agent.post("/mail/backups/delete", Some(body)).await
         .map_err(|e| agent_error("Delete backup", e))?;
     let ip = crate::routes::client_ip(&headers);
-    activity::log_activity(&state.db, claims.sub, &claims.email, "mail.backup_delete", None, None, None, ip.as_deref()).await;
+    activity::log_activity(&state.db, claims.sub, &claims.email, "mail.backup_delete", None, None, None, ip.as_deref(), claims.key_id).await;
     crate::services::security_hardening::audit_log(
-        &state.db, "mail.backup_delete", Some(&claims.email), ip.as_deref(), None, None, None, None, "warning",
+        &state.db, "mail.backup_delete", Some(&claims.email), ip.as_deref(), None, None, None, None, "warning", claims.key_id,
     ).await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -2303,9 +2309,9 @@ pub async fn tls_enforce(
     agent.post("/mail/tls/enforce", Some(body)).await
         .map_err(|e| agent_error("TLS enforce", e))?;
     let ip = crate::routes::client_ip(&headers);
-    activity::log_activity(&state.db, claims.sub, &claims.email, "mail.tls_enforce", None, None, None, ip.as_deref()).await;
+    activity::log_activity(&state.db, claims.sub, &claims.email, "mail.tls_enforce", None, None, None, ip.as_deref(), claims.key_id).await;
     crate::services::security_hardening::audit_log(
-        &state.db, "mail.tls_enforce", Some(&claims.email), ip.as_deref(), None, None, None, None, "warning",
+        &state.db, "mail.tls_enforce", Some(&claims.email), ip.as_deref(), None, None, None, None, "warning", claims.key_id,
     ).await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }

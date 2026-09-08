@@ -1,6 +1,6 @@
 # DockPanel Feature Manifest
 
-> **Version**: v2.239.1 | **Total**: 60+ major features, ~285 capabilities
+> **Version**: v2.240.0 | **Total**: 60+ major features, ~285 capabilities
 >
 > This file is the single source of truth for what DockPanel offers.
 > Update it whenever features are added, changed, or removed.
@@ -243,7 +243,7 @@ honest:
 | HTTP routes | 840 (545 backend + 295 agent) | derived | every commit |
 | Regression-pin assertions | 4544 (137 suites) | derived | every commit |
 | Frontend pages | 52 | derived | every commit |
-| DB migrations | 136 | derived | every commit |
+| DB migrations | 137 | derived | every commit |
 | Supervised background services | 17 | derived | every commit |
 
 Five of these were wrong when the register was built (s272), some by a factor of

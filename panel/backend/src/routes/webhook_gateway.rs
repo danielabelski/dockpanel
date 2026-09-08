@@ -219,7 +219,7 @@ pub async fn create_endpoint(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "webhook_endpoint.create",
-        Some("webhook"), Some(&req.name), Some(&token), None,
+        Some("webhook"), Some(&req.name), Some(&token), None, claims.key_id,
     ).await;
 
     Ok((StatusCode::CREATED, Json(endpoint)))
@@ -244,12 +244,12 @@ pub async fn delete_endpoint(
     let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "webhook_endpoint.delete",
-        Some("webhook"), Some(&id.to_string()), None, ip.as_deref(),
+        Some("webhook"), Some(&id.to_string()), None, ip.as_deref(), claims.key_id,
     ).await;
 
     crate::services::security_hardening::audit_log(
         &state.db, "webhook_endpoint.delete", Some(&claims.email), ip.as_deref(),
-        Some("webhook"), Some(&id.to_string()), None, None, "warning",
+        Some("webhook"), Some(&id.to_string()), None, None, "warning", claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -285,7 +285,7 @@ pub async fn set_endpoint_enabled(
     activity::log_activity(
         &state.db, claims.sub, &claims.email,
         if req.enabled { "webhook_endpoint.enable" } else { "webhook_endpoint.disable" },
-        Some("webhook"), Some(&id.to_string()), None, None,
+        Some("webhook"), Some(&id.to_string()), None, None, claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true, "enabled": req.enabled })))
@@ -373,7 +373,7 @@ pub async fn replay_delivery(
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "webhook_delivery.replay",
         Some("webhook"), Some(&delivery_id.to_string()),
-        Some(&format!("{} route(s)", forwarded)), None,
+        Some(&format!("{} route(s)", forwarded)), None, claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true, "replayed_to": forwarded })))
@@ -497,7 +497,7 @@ pub async fn set_route_enabled(
     activity::log_activity(
         &state.db, claims.sub, &claims.email,
         if req.enabled { "webhook_route.enable" } else { "webhook_route.disable" },
-        Some("webhook"), Some(&route_id.to_string()), None, None,
+        Some("webhook"), Some(&route_id.to_string()), None, None, claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true, "enabled": req.enabled })))

@@ -161,7 +161,7 @@ pub async fn create(
     tracing::info!("Cron created: {} for {domain}", cron.schedule);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "cron.create",
-        Some("cron"), Some(&domain), Some(&label), None,
+        Some("cron"), Some(&domain), Some(&label), None, claims.key_id,
     ).await;
 
     Ok((StatusCode::CREATED, Json(cron)))
@@ -229,7 +229,7 @@ pub async fn update(
     tracing::info!("Cron updated: {cron_id} for {domain}");
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "cron.update",
-        Some("cron"), Some(&domain), Some(&cron.label), None,
+        Some("cron"), Some(&domain), Some(&cron.label), None, claims.key_id,
     ).await;
 
     Ok(Json(cron))
@@ -265,12 +265,12 @@ pub async fn remove(
     let ip = crate::routes::client_ip(&headers);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "cron.delete",
-        Some("cron"), Some(&domain), None, ip.as_deref(),
+        Some("cron"), Some(&domain), None, ip.as_deref(), claims.key_id,
     ).await;
 
     crate::services::security_hardening::audit_log(
         &state.db, "cron.delete", Some(&claims.email), ip.as_deref(),
-        Some("cron"), Some(&domain), None, None, "warning",
+        Some("cron"), Some(&domain), None, None, "warning", claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -325,7 +325,7 @@ pub async fn run_now(
     tracing::info!("Cron executed manually: {cron_id} for {domain} — {status_str}");
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "cron.run",
-        Some("cron"), Some(&domain), Some(&cron.label), Some(status_str),
+        Some("cron"), Some(&domain), Some(&cron.label), Some(status_str), claims.key_id,
     ).await;
 
     // GAP 30: Fire alert on cron job failure

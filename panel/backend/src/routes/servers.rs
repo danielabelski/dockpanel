@@ -194,6 +194,7 @@ pub async fn create(
         Some(name),
         None,
         caller_ip.as_deref(),
+        claims.key_id,
     )
     .await;
 
@@ -207,6 +208,7 @@ pub async fn create(
         None,
         None,
         "warning",
+        claims.key_id,
     )
     .await;
 
@@ -281,6 +283,7 @@ pub async fn remove(
         Some(&server.name),
         None,
         ip.as_deref(),
+        claims.key_id,
     )
     .await;
 
@@ -294,6 +297,7 @@ pub async fn remove(
         None,
         None,
         "critical",
+        claims.key_id,
     )
     .await;
 
@@ -340,6 +344,7 @@ pub async fn rotate_cert_pin(
         Some(&server.name),
         None,
         ip.as_deref(),
+        claims.key_id,
     )
     .await;
 
@@ -353,6 +358,7 @@ pub async fn rotate_cert_pin(
         None,
         None,
         "warning",
+        claims.key_id,
     )
     .await;
 
@@ -475,6 +481,7 @@ pub async fn update(
         Some(name),
         None,
         caller_ip.as_deref(),
+        claims.key_id,
     )
     .await;
 
@@ -488,6 +495,7 @@ pub async fn update(
         None,
         None,
         "warning",
+        claims.key_id,
     )
     .await;
 
@@ -590,6 +598,7 @@ pub async fn rotate_token(
         None,
         None,
         ip.as_deref(),
+        claims.key_id,
     )
     .await;
 
@@ -603,6 +612,7 @@ pub async fn rotate_token(
         None,
         None,
         "critical",
+        claims.key_id,
     )
     .await;
 

@@ -4,6 +4,36 @@ All notable changes to DockPanel will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.240.0]
+
+### Add: MCP server, session 1 — crate scaffold + audit-attribution fix (read-only tools land in the next release)
+
+The first half of a design for letting an AI agent talk to DockPanel over the Model Context Protocol.
+This release ships the plumbing, not the feature surface an operator would notice yet:
+
+- **`panel/mcp`**, a 4th standalone crate (`dockpanel-mcp`), following the exact pattern
+  `dockpanel-cli` already uses to talk to the panel API — a `dp_` key over loopback HTTP, read from
+  `/etc/dockpanel/mcp.token`. Built on `rmcp` 3.2.0 (pinned: 2.0.0 fixed a CVSS 7.5 unauthenticated
+  DoS in older releases), Streamable HTTP transport only. Ships 3 read-only tools (`list_sites`,
+  `get_security_audit_log`, `get_fleet_dashboard`) to prove the pipeline end to end — the full
+  ~40-tool read-only catalogue is next release.
+- **Installed but not enabled.** `setup.sh`/`update.sh` install the `dockpanel-mcp` systemd unit and
+  binary; nothing starts it automatically, and there is no settings toggle yet. An operator who wants
+  it today: mint a `dp_` key (Settings → API Keys), save it to `/etc/dockpanel/mcp.token`, then
+  `systemctl enable --now dockpanel-mcp`. nginx proxies `/mcp` (exact match) to it once running.
+  `mcp_server_enabled` and the settings UI land with the tool catalogue.
+- **Audit-attribution fix (the reason this shipped ahead of any UI).** Before this release, an
+  action authenticated with a `dp_` key was indistinguishable from a browser session in both audit
+  tables — `authenticate_api_key` looked up the key's id, used it once for `last_used_at`, and
+  discarded it. `Claims` now carries `key_id: Option<Uuid>`, threaded through every
+  `log_activity`/`log_activity_on_server`/`audit_log` call site (348 call sites across 42 files) to
+  a new `api_key_id` column on `activity_logs` and `security_audit_log`. This has to be in place
+  before any mutating MCP tool ever ships, or the audit log could never answer "did an agent do this
+  or did an operator click a button."
+- **Schema, unenforced until next release:** `api_keys.scopes` (nullable — every existing key keeps
+  today's all-or-nothing behavior) and `security_audit_log.actor_user_id` (a real FK, alongside the
+  existing free-text `actor_email`).
+
 ## [2.239.1]
 
 ### Fix: Agent binary size register was 1MB stale

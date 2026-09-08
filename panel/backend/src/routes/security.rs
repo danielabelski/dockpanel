@@ -100,10 +100,12 @@ pub async fn add_firewall_rule(
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "firewall.add",
         Some("firewall"), Some(&rule_name), None, ip.as_deref(),
+        claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, "firewall.add", Some(&claims.email), ip.as_deref(),
         Some("firewall"), Some(&rule_name), None, None, "warning",
+        claims.key_id,
     ).await;
 
     Ok(Json(result))
@@ -127,10 +129,12 @@ pub async fn delete_firewall_rule(
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "firewall.delete",
         Some("firewall"), Some(&format!("rule #{number}")), None, ip.as_deref(),
+        claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, "firewall.delete", Some(&claims.email), ip.as_deref(),
         Some("firewall"), Some(&format!("rule #{number}")), None, None, "warning",
+        claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -163,10 +167,12 @@ pub async fn ssh_disable_password(
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "security.ssh_disable_password",
         None, None, None, ip.as_deref(),
+        claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, "security.ssh_disable_password", Some(&claims.email), ip.as_deref(),
         None, None, None, None, "warning",
+        claims.key_id,
     ).await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -184,10 +190,12 @@ pub async fn ssh_enable_password(
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "security.ssh_enable_password",
         None, None, None, ip.as_deref(),
+        claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, "security.ssh_enable_password", Some(&claims.email), ip.as_deref(),
         None, None, None, None, "warning",
+        claims.key_id,
     ).await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -205,10 +213,12 @@ pub async fn ssh_disable_root(
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "security.ssh_disable_root",
         None, None, None, ip.as_deref(),
+        claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, "security.ssh_disable_root", Some(&claims.email), ip.as_deref(),
         None, None, None, None, "warning",
+        claims.key_id,
     ).await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -227,10 +237,12 @@ pub async fn ssh_change_port(
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "security.ssh_change_port",
         None, None, None, ip.as_deref(),
+        claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, "security.ssh_change_port", Some(&claims.email), ip.as_deref(),
         None, None, None, None, "warning",
+        claims.key_id,
     ).await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -533,10 +545,12 @@ pub async fn setup_panel_jail(
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "security.panel_jail_setup",
         None, None, None, ip.as_deref(),
+        claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, "security.panel_jail_setup", Some(&claims.email), ip.as_deref(),
         None, None, None, None, "info",
+        claims.key_id,
     ).await;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -660,6 +674,7 @@ pub async fn canary_arm(
         None,
         Some(&format!("Armed {armed} of {total} canary files")),
         ip.as_deref(),
+        claims.key_id,
     )
     .await;
     crate::services::security_hardening::audit_log(
@@ -672,6 +687,7 @@ pub async fn canary_arm(
         Some(&format!("Armed {armed} of {total} canary files")),
         None,
         "warning",
+        claims.key_id,
     )
     .await;
 
@@ -705,10 +721,12 @@ pub async fn apply_security_fix(
     activity::log_activity(
         &state.db, claims.sub, &claims.email, &format!("security.fix.{fix_type}"),
         Some("security"), Some(target), None, ip.as_deref(),
+        claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db, &format!("security.fix.{fix_type}"), Some(&claims.email), ip.as_deref(),
         Some("security"), Some(target), None, None, "warning",
+        claims.key_id,
     ).await;
     Ok(Json(result))
 }
@@ -902,6 +920,7 @@ pub async fn lockdown_activate(
     security_hardening::audit_log(
         &state.db, "lockdown.manual", Some(&claims.email), None,
         Some("system"), None, Some(reason), None, "critical",
+        claims.key_id,
     ).await;
     security_hardening::alert_lockdown(&state.db, reason, &format!("admin:{}", claims.email)).await;
 
@@ -917,6 +936,7 @@ pub async fn lockdown_deactivate(
     security_hardening::audit_log(
         &state.db, "lockdown.deactivate", Some(&claims.email), None,
         Some("system"), None, None, None, "info",
+        claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "status": "unlocked" })))
@@ -1145,6 +1165,7 @@ pub async fn panic_button(
     security_hardening::audit_log(
         &state.db, "panic", Some(&claims.email), None,
         Some("system"), None, Some(outcome.as_str()), None, "critical",
+        claims.key_id,
     ).await;
     security_hardening::alert_lockdown(&state.db, &outcome, &format!("panic:{}", claims.email)).await;
 
@@ -1182,6 +1203,7 @@ pub async fn forensic_snapshot(
     security_hardening::audit_log(
         &state.db, "forensic.snapshot", Some(&claims.email), None,
         Some("system"), None, Some("Forensic snapshot captured"), None, "info",
+        claims.key_id,
     ).await;
 
     Ok(Json(result))
@@ -1312,6 +1334,7 @@ pub async fn approve_user(
     security_hardening::audit_log(
         &state.db, "user.approve", Some(&claims.email), None,
         Some("user"), Some(&user_id.to_string()), None, None, "info",
+        claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "status": "approved" })))
@@ -1373,6 +1396,7 @@ pub async fn verify_user_email(
     security_hardening::audit_log(
         &state.db, "user.email_verify", Some(&claims.email), None,
         Some("user"), Some(&user_id.to_string()), None, None, "info",
+        claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "status": "verified" })))

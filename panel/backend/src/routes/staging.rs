@@ -384,6 +384,7 @@ pub async fn create(
         Some(&staging_domain),
         Some(&parent.domain),
         None,
+        claims.key_id,
     )
     .await;
 
@@ -491,6 +492,7 @@ pub async fn sync_to_staging(
         Some(&staging.domain),
         Some(&format!("{} → {}", parent.domain, staging.domain)),
         None,
+        claims.key_id,
     )
     .await;
 
@@ -542,6 +544,7 @@ pub async fn push_to_prod(
         Some(&staging.domain),
         Some(&format!("{} → {}", staging.domain, parent.domain)),
         ip.as_deref(),
+        claims.key_id,
     )
     .await;
     crate::services::security_hardening::audit_log(
@@ -554,6 +557,7 @@ pub async fn push_to_prod(
         Some(&format!("{} → {}", staging.domain, parent.domain)),
         None,
         "warning",
+        claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true, "message": format!("Pushed {} → {}", staging.domain, parent.domain) })))
@@ -644,6 +648,7 @@ pub async fn destroy(
         Some(&staging.domain),
         None,
         ip.as_deref(),
+        claims.key_id,
     )
     .await;
     crate::services::security_hardening::audit_log(
@@ -656,6 +661,7 @@ pub async fn destroy(
         None,
         None,
         "warning",
+        claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true, "domain": staging.domain })))

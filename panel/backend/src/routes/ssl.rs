@@ -619,6 +619,7 @@ pub async fn provision_dns01(
         &state.db, claims.sub, &claims.email,
         if wildcard { "site.ssl.wildcard" } else { "site.ssl.dns01" },
         Some("site"), Some(&site.domain), None, None,
+        claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({
@@ -1165,6 +1166,7 @@ pub(crate) async fn renew_for_site(
     activity::log_activity(
         &state.db, actor_id, actor_email, "ssl.renew",
         Some("site"), Some(&site.domain), None, None,
+        None,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true, "domain": site.domain })))
@@ -1242,6 +1244,7 @@ pub async fn revoke(
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "ssl.revoke",
         Some("site"), Some(&site.domain), None, ip.as_deref(),
+        claims.key_id,
     ).await;
     crate::services::security_hardening::audit_log(
         &state.db,
@@ -1253,6 +1256,7 @@ pub async fn revoke(
         None,
         None,
         "warning",
+        claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true, "domain": site.domain })))
@@ -1380,6 +1384,7 @@ pub async fn set_contact_email(
         None, None,
         Some(&format!("email={:?}", body.email)),
         None,
+        claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true, "contact_email": body.email })))
@@ -1421,6 +1426,7 @@ pub async fn set_default_profile(
         None, None,
         Some(&format!("profile={:?}", body.profile)),
         None,
+        claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({

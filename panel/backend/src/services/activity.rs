@@ -10,6 +10,7 @@ pub async fn log_activity(
     target_name: Option<&str>,
     details: Option<&str>,
     ip_address: Option<&str>,
+    api_key_id: Option<Uuid>,
 ) {
     write_row(
         pool,
@@ -21,6 +22,7 @@ pub async fn log_activity(
         details,
         ip_address,
         None,
+        api_key_id,
     )
     .await
 }
@@ -48,6 +50,7 @@ pub async fn log_activity_on_server(
     details: Option<&str>,
     ip_address: Option<&str>,
     server_id: Option<Uuid>,
+    api_key_id: Option<Uuid>,
 ) {
     write_row(
         pool,
@@ -59,6 +62,7 @@ pub async fn log_activity_on_server(
         details,
         ip_address,
         server_id,
+        api_key_id,
     )
     .await
 }
@@ -106,6 +110,8 @@ pub async fn log_activity_system(
         details,
         ip_address,
         server_id,
+        // No authenticated request is involved — nothing to attribute to a key.
+        None,
     )
     .await
 }
@@ -124,9 +130,10 @@ async fn write_row(
     details: Option<&str>,
     ip_address: Option<&str>,
     server_id: Option<Uuid>,
+    api_key_id: Option<Uuid>,
 ) {
     if let Err(e) = sqlx::query(
-        "INSERT INTO activity_logs (user_id, user_email, action, target_type, target_name, details, ip_address, server_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
+        "INSERT INTO activity_logs (user_id, user_email, action, target_type, target_name, details, ip_address, server_id, api_key_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"
     )
     .bind(user_id)
     .bind(user_email)
@@ -136,6 +143,7 @@ async fn write_row(
     .bind(details)
     .bind(ip_address)
     .bind(server_id)
+    .bind(api_key_id)
     .execute(pool)
     .await {
         tracing::warn!("Failed to log activity '{action}': {e}");

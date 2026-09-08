@@ -37,6 +37,13 @@ pub struct Claims {
     /// JWT ID for token blacklisting on logout.
     #[serde(default)]
     pub jti: Option<String>,
+    /// The `api_keys.id` this session authenticated with, so a request made
+    /// through a `dp_` key (an MCP tool call, a CLI invocation) is attributable
+    /// in the audit trail instead of looking identical to a browser session.
+    /// `None` on the JWT path (`#[serde(default)]` so tokens issued before this
+    /// field existed still decode). See `log_activity`/`audit_log` call sites.
+    #[serde(default)]
+    pub key_id: Option<Uuid>,
 }
 
 /// JWT extractor — reads token from Authorization header or `token` cookie.
@@ -207,6 +214,7 @@ async fn authenticate_api_key(state: &AppState, key: &str) -> Result<Claims, Api
         sub: user_id,
         email,
         role,
+        key_id: Some(key_id),
         // An API key has no session lifetime of its own — it lives until its
         // `api_keys` row is deleted (or the revocation check above fires).
         // `exp` still has to be a value in the future because nothing

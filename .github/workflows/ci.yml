@@ -32,6 +32,7 @@ jobs:
             panel/agent/target/
             panel/backend/target/
             panel/cli/target/
+            panel/mcp/target/
           key: ${{ runner.os }}-cargo-lint-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-lint-
 
@@ -43,6 +44,9 @@ jobs:
 
       - name: Clippy — CLI
         run: cargo clippy --manifest-path panel/cli/Cargo.toml --release 2>&1 || true
+
+      - name: Clippy — MCP
+        run: cargo clippy --manifest-path panel/mcp/Cargo.toml --release 2>&1 || true
 
   lint-frontend:
     name: Lint (Frontend)
@@ -83,6 +87,7 @@ jobs:
             panel/agent/target/
             panel/backend/target/
             panel/cli/target/
+            panel/mcp/target/
           key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-build-
 
@@ -95,6 +100,9 @@ jobs:
       - name: Build CLI
         run: cargo build --release --manifest-path panel/cli/Cargo.toml
 
+      - name: Build MCP
+        run: cargo build --release --manifest-path panel/mcp/Cargo.toml
+
       - name: Report binary sizes
         run: |
           echo "| Binary | Size |" >> $GITHUB_STEP_SUMMARY
@@ -102,6 +110,7 @@ jobs:
           echo "| Agent | $(du -h panel/agent/target/release/dockpanel-agent | cut -f1) |" >> $GITHUB_STEP_SUMMARY
           echo "| API | $(du -h panel/backend/target/release/dockpanel-api | cut -f1) |" >> $GITHUB_STEP_SUMMARY
           echo "| CLI | $(du -h panel/cli/target/release/dockpanel | cut -f1) |" >> $GITHUB_STEP_SUMMARY
+          echo "| MCP | $(du -h panel/mcp/target/release/dockpanel-mcp | cut -f1) |" >> $GITHUB_STEP_SUMMARY
 
   build-frontend:
     name: Build (Frontend)
@@ -183,6 +192,15 @@ jobs:
 
       - name: Audit CLI
         run: cd panel/cli && cargo audit
+
+      # rmcp is the newest, fastest-moving dependency in this codebase (63
+      # releases since March 2025, one disclosed CVSS 7.5 DoS already patched
+      # — see the >=3.2.0 pin comment in panel/mcp/Cargo.toml). Dependabot
+      # alone has repeatedly missed Rust advisories on this project
+      # (RUSTSEC entries aren't GitHub Security Advisories) — this is the
+      # audit that actually catches them.
+      - name: Audit MCP
+        run: cd panel/mcp && cargo audit
 
       - name: Setup Node.js
         uses: actions/setup-node@v6

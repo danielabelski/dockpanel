@@ -385,6 +385,7 @@ pub async fn register_begin(
                 None,
                 None,
                 None,
+                claims.key_id,
             )
             .await;
 
@@ -398,6 +399,7 @@ pub async fn register_begin(
                 None,
                 None,
                 "warning",
+                claims.key_id,
             )
             .await;
         }
@@ -613,12 +615,12 @@ pub async fn register_complete(
     // Audit log
     crate::services::activity::log_activity(
         &state.db, claims.sub, &claims.email, "passkey.registered",
-        Some("passkey"), Some(name), None, None,
+        Some("passkey"), Some(name), None, None, claims.key_id,
     ).await;
 
     crate::services::security_hardening::audit_log(
         &state.db, "passkey.registered", Some(&claims.email), None,
-        Some("passkey"), Some(name), None, None, "warning",
+        Some("passkey"), Some(name), None, None, "warning", claims.key_id,
     ).await;
 
     // Tell the OWNER, not the admins. A planted credential is durable mainly
@@ -859,6 +861,7 @@ pub async fn auth_complete(
             None,
             None,
             "warning",
+            None,
         )
         .await;
 
@@ -905,6 +908,7 @@ pub async fn auth_complete(
             Some(&format!("stored={stored_count}, presented={new_count}")),
             None,
             "warning",
+            None,
         )
         .await;
 
@@ -980,12 +984,12 @@ pub async fn auth_complete(
     // Audit log
     crate::services::activity::log_activity(
         &state.db, user.id, &user.email, "auth.passkey_login",
-        None, None, None, Some(&ip),
+        None, None, None, Some(&ip), None,
     ).await;
 
     crate::services::security_hardening::audit_log(
         &state.db, "passkey_login", Some(&user.email), Some(&ip),
-        Some("user"), None, None, None, "info",
+        Some("user"), None, None, None, "info", None,
     ).await;
 
     tracing::info!("Passkey login for user {}", user.email);
@@ -1050,12 +1054,12 @@ pub async fn delete_passkey(
     let ip = crate::routes::client_ip(&headers);
     crate::services::activity::log_activity(
         &state.db, claims.sub, &claims.email, "passkey.deleted",
-        Some("passkey"), None, None, ip.as_deref(),
+        Some("passkey"), None, None, ip.as_deref(), claims.key_id,
     ).await;
 
     crate::services::security_hardening::audit_log(
         &state.db, "passkey.deleted", Some(&claims.email), ip.as_deref(),
-        Some("passkey"), None, None, None, "warning",
+        Some("passkey"), None, None, None, "warning", claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -1087,7 +1091,7 @@ pub async fn rename_passkey(
 
     crate::services::activity::log_activity(
         &state.db, claims.sub, &claims.email, "passkey.renamed",
-        Some("passkey"), Some(name), None, None,
+        Some("passkey"), Some(name), None, None, claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))

@@ -391,6 +391,7 @@ async fn auto_restart_services(pool: &PgPool, agents: &AgentRegistry) {
             Some(&format!("server={server_name} success={success}, result={details}")),
             None,
             Some(server_id),
+            None,
         )
         .await;
 
@@ -502,6 +503,7 @@ async fn auto_restart_services(pool: &PgPool, agents: &AgentRegistry) {
                 Some(&format!("server={} success={success}, state={state}", member.name)),
                 None,
                 Some(member.id),
+                None,
             ).await;
 
             if success {
@@ -616,6 +618,7 @@ async fn auto_clean_disk(pool: &PgPool, agents: &AgentRegistry) {
             Some(&format!("server={server_name} success={success}")),
             None,
             Some(server_id),
+            None,
         )
         .await;
 
@@ -1129,6 +1132,7 @@ async fn auto_renew_ssl(pool: &PgPool, agents: &AgentRegistry) {
             Some(&format!("site_id={site_id}, success={success}, result={details}")),
             None,
             Some(*server_id),
+            None,
         )
         .await;
 
@@ -1907,7 +1911,7 @@ async fn security_ingest_suspicious_events(pool: &PgPool) {
             super::security_hardening::audit_log(
                 pool, event_type, actor_email, None,
                 Some("terminal"), Some(domain),
-                Some(&details), None, "warning",
+                Some(&details), None, "warning", None,
             ).await;
 
             // If lockdown was triggered, send alert
@@ -2108,7 +2112,7 @@ async fn security_check_canary_files(pool: &PgPool) {
                 pool, "canary.triggered", None, None,
                 Some("canary"), Some(path),
                 Some(&format!("Canary file accessed at {}", chrono::DateTime::from_timestamp(atime, 0).map(|d| d.to_rfc3339()).unwrap_or_default())),
-                None, "critical",
+                None, "critical", None,
             ).await;
 
             // Record as suspicious event (may trigger auto-lockdown)
@@ -2221,7 +2225,7 @@ async fn security_check_lockdown_expiry(pool: &PgPool) {
                 pool, "lockdown.auto_expire", None, None,
                 Some("system"), None,
                 Some(&format!("Lockdown auto-expired after {}h", hours_locked)),
-                None, "info",
+                None, "info", None,
             ).await;
             tracing::info!("Lockdown auto-expired after {hours_locked}h");
         }

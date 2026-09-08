@@ -150,6 +150,7 @@ pub async fn create(
     let user_id = claims.sub;
     let email = claims.email.clone();
     let domain_clone = domain.clone();
+    let key_id = claims.key_id;
 
     tokio::spawn(async move {
         let emit = |step: &str, label: &str, status: &str, msg: Option<String>| {
@@ -272,7 +273,7 @@ pub async fn create(
                 );
                 activity::log_activity(
                     &db, user_id, &email, "backup.create",
-                    Some("backup"), Some(&domain_clone), Some(&filename), None,
+                    Some("backup"), Some(&domain_clone), Some(&filename), None, key_id,
                 ).await;
 
                 fire_event(&db, "backup.created", serde_json::json!({
@@ -366,6 +367,7 @@ pub async fn restore(
     let domain_clone = domain.clone();
     let filename = backup.filename.clone();
     let ip = crate::routes::client_ip(&headers);
+    let key_id = claims.key_id;
 
     tokio::spawn(async move {
         let emit = |step: &str, label: &str, status: &str, msg: Option<String>| {
@@ -441,11 +443,11 @@ pub async fn restore(
                     );
                     activity::log_activity(
                         &db, user_id, &email, "backup.restore_partial",
-                        Some("backup"), Some(&domain_clone), Some(&filename), ip.as_deref(),
+                        Some("backup"), Some(&domain_clone), Some(&filename), ip.as_deref(), key_id,
                     ).await;
                     crate::services::security_hardening::audit_log(
                         &db, "backup.restore_partial", Some(&email), ip.as_deref(),
-                        Some("backup"), Some(&domain_clone), Some(&filename), None, "warning",
+                        Some("backup"), Some(&domain_clone), Some(&filename), None, "warning", key_id,
                     ).await;
                     tokio::time::sleep(Duration::from_secs(60)).await;
                     logs.lock().unwrap_or_else(|e| e.into_inner()).remove(&restore_id);
@@ -501,11 +503,11 @@ pub async fn restore(
                 tracing::info!("Backup restored: {filename} for {domain_clone}");
                 activity::log_activity(
                     &db, user_id, &email, "backup.restore",
-                    Some("backup"), Some(&domain_clone), Some(&filename), ip.as_deref(),
+                    Some("backup"), Some(&domain_clone), Some(&filename), ip.as_deref(), key_id,
                 ).await;
                 crate::services::security_hardening::audit_log(
                     &db, "backup.restore", Some(&email), ip.as_deref(),
-                    Some("backup"), Some(&domain_clone), Some(&filename), None, "info",
+                    Some("backup"), Some(&domain_clone), Some(&filename), None, "info", key_id,
                 ).await;
             }
             Err(e) => {

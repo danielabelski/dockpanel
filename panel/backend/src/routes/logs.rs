@@ -400,6 +400,7 @@ pub async fn truncate_log(
         None,
         None,
         ip.as_deref(),
+        claims.key_id,
     )
     .await;
     crate::services::security_hardening::audit_log(
@@ -412,6 +413,7 @@ pub async fn truncate_log(
         None,
         None,
         "warning",
+        claims.key_id,
     )
     .await;
     Ok(Json(serde_json::json!({ "ok": true })))

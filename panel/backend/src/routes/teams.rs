@@ -167,7 +167,7 @@ pub async fn create(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "team.create",
-        Some("team"), Some(name), None, None,
+        Some("team"), Some(name), None, None, claims.key_id,
     ).await;
 
     Ok((StatusCode::CREATED, Json(team)))
@@ -201,12 +201,12 @@ pub async fn remove(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "team.delete",
-        Some("team"), Some(&team.name), None, ip.as_deref(),
+        Some("team"), Some(&team.name), None, ip.as_deref(), claims.key_id,
     ).await;
 
     crate::services::security_hardening::audit_log(
         &state.db, "team.delete", Some(&claims.email), ip.as_deref(),
-        Some("team"), Some(&team.name), None, None, "warning",
+        Some("team"), Some(&team.name), None, None, "warning", claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -377,7 +377,7 @@ pub async fn accept_invite(
 
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "team.join",
-        Some("team"), Some(&team_name.0), None, None,
+        Some("team"), Some(&team_name.0), None, None, claims.key_id,
     ).await;
 
     Ok(Json(serde_json::json!({ "ok": true, "team": team_name.0 })))
