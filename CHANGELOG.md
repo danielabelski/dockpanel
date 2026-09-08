@@ -4,6 +4,15 @@ All notable changes to DockPanel will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.239.1]
+
+### Fix: Agent binary size register was 1MB stale
+
+`live-surfaces-check.sh` caught it on the v2.239.0 push: the published `dockpanel-agent-linux-amd64`
+asset is 22.0 MB, not the 21 MB `FEATURES.md`'s Verified Metrics register (and README) had held
+since v2.103.0 — a pre-existing drift, not something this release introduced, made visible because
+Live Surfaces re-runs on every push. Corrected both surfaces to 22 MB.
+
 ## [2.239.0]
 
 ### Git Deploy previews now report status to GitHub
