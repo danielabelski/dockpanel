@@ -253,8 +253,21 @@ if S=$(subj "$GITDEP"); then
   # `provided` mode can be refused and fall back to plain HTTP) pass
   # `actual_mode` instead of the merely-requested `effective_mode` — still
   # the SAME function, never a second hardcoded scheme.
+  #
+  # A caller may also route through a variable computed ONCE via deploy_url
+  # and reused across several calls (the preview-deploy path added at s484,
+  # `github_target`) — same safety property, a DRYer shape. Credit it only
+  # if that variable's OWN definition resolves through deploy_url, never by
+  # name alone — otherwise a future `let github_target = domain.to_string()`
+  # would satisfy this arm while reintroducing exactly the hardcoded scheme
+  # deploy_url exists to prevent.
   CALLS=$(count "$S" 'set_github_status\(')
-  RESOLVED=$(count "$S" 'deploy_url\(d, (effective_mode|actual_mode)\)')
+  DIRECT_RESOLVED=$(count "$S" 'deploy_url\(d, (effective_mode|actual_mode)\)')
+  SHARED_RESOLVED=0
+  if has "$S" 'github_target[ ]*=[ ]*preview_domain\.as_deref\(\)\.map\(\|d\|[ ]*deploy_url\(d, (effective_mode|actual_mode)\)\)'; then
+    SHARED_RESOLVED=$(count "$S" 'set_github_status\([^)]*github_target')
+  fi
+  RESOLVED=$((DIRECT_RESOLVED + SHARED_RESOLVED))
   # CALLS counts the definition too, so callers = CALLS - 1.
   if [ "$RESOLVED" -ge "$((CALLS - 1))" ]; then
     ok "all $((CALLS - 1)) set_github_status callers resolve through deploy_url"

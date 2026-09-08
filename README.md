@@ -6,7 +6,11 @@
 
 <p align="center">
   <strong>The most feature-packed free server panel ever built.</strong><br>
-  Self-hosted. Docker-native. Written in Rust. Panel services run on <strong>~49MB of RAM</strong>. 839 HTTP routes. 147 app templates. 4514 regression assertions. ~51MB binaries. Zero subscriptions.
+  Self-hosted. Docker-native. Written in Rust. Panel services run on <strong>~49MB of RAM</strong>. 840 HTTP routes. 147 app templates. 4544 regression assertions. ~51MB binaries. Zero subscriptions.
+</p>
+
+<p align="center">
+  <sub>Not the WPF/WinForms <code>DockPanel</code> docking control — this is a self-hosted Linux server panel.</sub>
 </p>
 
 <p align="center">

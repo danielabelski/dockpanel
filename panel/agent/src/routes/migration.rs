@@ -10,10 +10,53 @@ use crate::services::migration;
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        .route("/migration/fetch", post(fetch))
         .route("/migration/analyze", post(analyze))
         .route("/migration/import-site", post(import_site))
         .route("/migration/import-database", post(import_database))
         .route("/migration/cleanup", post(cleanup))
+}
+
+/// POST /migration/fetch — download a backup archive from a URL into the
+/// `/var/backups/dockpanel/` tree `analyze` already trusts, so an operator no
+/// longer has to SFTP it up first.
+async fn fetch(
+    State(_state): State<AppState>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let url = body["url"].as_str().ok_or((StatusCode::BAD_REQUEST, "url required".into()))?;
+    let dest = body["dest"].as_str().ok_or((StatusCode::BAD_REQUEST, "dest required".into()))?;
+
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Err((StatusCode::BAD_REQUEST, "Only http:// and https:// URLs are supported".into()));
+    }
+    if let Err(e) = crate::services::ssrf_guard::validate_repo_url_not_internal(url).await {
+        return Err((StatusCode::BAD_REQUEST, format!("URL rejected: {e}")));
+    }
+
+    // Same shape as `analyze`'s own guard below: reject traversal, then require
+    // the resolved directory (the file itself does not exist yet) to still be
+    // inside the one subtree this unit can actually write to.
+    if dest.contains("..") || dest.contains('\0') {
+        return Err((StatusCode::BAD_REQUEST, "Path traversal not allowed".into()));
+    }
+    if !dest.starts_with(&format!("{}/", migration::FETCH_DIR)) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("Destination must be within {}/", migration::FETCH_DIR),
+        ));
+    }
+    let parent = std::path::Path::new(dest).parent().ok_or((StatusCode::BAD_REQUEST, "Invalid destination".into()))?;
+    if let Ok(canon_parent) = parent.canonicalize() {
+        if !canon_parent.starts_with(migration::FETCH_DIR) {
+            return Err((StatusCode::BAD_REQUEST, "Resolved path not in allowed directories".into()));
+        }
+    }
+
+    match migration::fetch_archive(url, dest).await {
+        Ok(bytes) => Ok(Json(serde_json::json!({ "ok": true, "path": dest, "bytes": bytes }))),
+        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, e)),
+    }
 }
 
 /// POST /migration/analyze — Extract and analyze a backup file

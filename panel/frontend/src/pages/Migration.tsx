@@ -70,7 +70,9 @@ export default function Migration() {
   // below the hooks; the redirect is unchanged.
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [source, setSource] = useState("cpanel");
+  const [inputMode, setInputMode] = useState<"path" | "url">("path");
   const [backupPath, setBackupPath] = useState("");
+  const [backupUrl, setBackupUrl] = useState("");
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState("");
   const [migration, setMigration] = useState<MigrationRecord | null>(null);
@@ -126,7 +128,9 @@ export default function Migration() {
   // Cloudflare error page that carried no JSON to read. The work always
   // continued on the server; nothing was ever able to come back and say so.
   const handleAnalyze = async () => {
-    if (!backupPath.trim()) return;
+    const trimmedPath = backupPath.trim();
+    const trimmedUrl = backupUrl.trim();
+    if (inputMode === "path" ? !trimmedPath : !trimmedUrl) return;
     startedHere.current = true;
     setError("");
     setAnalyzing(true);
@@ -135,7 +139,7 @@ export default function Migration() {
     setElapsed(0);
     try {
       const res = await api.post<MigrationRecord>("/migration/analyze", {
-        path: backupPath.trim(),
+        ...(inputMode === "path" ? { path: trimmedPath } : { url: trimmedUrl }),
         source,
       });
       if (res.status === "analyzing") {
@@ -355,24 +359,57 @@ export default function Migration() {
           </div>
 
           <div>
-            <label className="block text-sm text-dark-200 mb-1">Backup File Path</label>
-            <input
-              value={backupPath}
-              onChange={(e) => setBackupPath(e.target.value)}
-              placeholder="/var/backups/backup-1.2.2026_12-00-00_username.tar.gz"
-              className="w-full px-3 py-2 bg-dark-900 border border-dark-600 rounded-lg text-dark-50 text-sm focus:border-rust-500 focus:outline-none font-mono"
-            />
-            <p className="text-xs text-dark-400 mt-1">
-              Upload the backup to your server via SFTP first, then enter the full path here.
-              It must be under <code className="text-dark-200">/var/backups/</code>.{" "}
-              <code className="text-dark-200">/tmp/</code> will not work: the agent runs with a
-              private <code className="text-dark-200">/tmp</code> and cannot see the host's.
-            </p>
+            <div className="flex gap-2 mb-3">
+              {([
+                { id: "path" as const, label: "Path on server" },
+                { id: "url" as const, label: "Fetch from URL" },
+              ]).map((m) => (
+                <button
+                  key={m.id}
+                  onClick={() => setInputMode(m.id)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${inputMode === m.id ? "bg-rust-500 text-dark-950" : "bg-dark-900 text-dark-300 border border-dark-600 hover:border-dark-400"}`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+
+            {inputMode === "path" ? (
+              <>
+                <label className="block text-sm text-dark-200 mb-1">Backup File Path</label>
+                <input
+                  value={backupPath}
+                  onChange={(e) => setBackupPath(e.target.value)}
+                  placeholder="/var/backups/backup-1.2.2026_12-00-00_username.tar.gz"
+                  className="w-full px-3 py-2 bg-dark-900 border border-dark-600 rounded-lg text-dark-50 text-sm focus:border-rust-500 focus:outline-none font-mono"
+                />
+                <p className="text-xs text-dark-400 mt-1">
+                  Upload the backup to your server via SFTP first, then enter the full path here.
+                  It must be under <code className="text-dark-200">/var/backups/</code>.{" "}
+                  <code className="text-dark-200">/tmp/</code> will not work: the agent runs with
+                  a private <code className="text-dark-200">/tmp</code> and cannot see the host's.
+                </p>
+              </>
+            ) : (
+              <>
+                <label className="block text-sm text-dark-200 mb-1">Backup URL</label>
+                <input
+                  value={backupUrl}
+                  onChange={(e) => setBackupUrl(e.target.value)}
+                  placeholder="https://example.com/backup-1.2.2026_12-00-00_username.tar.gz"
+                  className="w-full px-3 py-2 bg-dark-900 border border-dark-600 rounded-lg text-dark-50 text-sm focus:border-rust-500 focus:outline-none font-mono"
+                />
+                <p className="text-xs text-dark-400 mt-1">
+                  The server downloads the archive itself — no SFTP step needed. HTTP(S) only, and
+                  the URL must not resolve to an internal or private address.
+                </p>
+              </>
+            )}
           </div>
 
           <button
             onClick={handleAnalyze}
-            disabled={!backupPath.trim() || analyzing}
+            disabled={(inputMode === "path" ? !backupPath.trim() : !backupUrl.trim()) || analyzing}
             className="px-5 py-2.5 bg-rust-500 text-dark-950 rounded-lg text-sm font-bold hover:bg-rust-400 transition-colors disabled:opacity-50"
           >
             {analyzing ? "Analyzing..." : "Analyze Backup"}

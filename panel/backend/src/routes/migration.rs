@@ -22,8 +22,17 @@ use crate::AppState;
 
 #[derive(serde::Deserialize)]
 pub struct AnalyzeRequest {
+    /// A path already on the server's disk. Mutually exclusive with `url` —
+    /// exactly one of the two must be set.
+    #[serde(default)]
     pub path: String,
     pub source: Option<String>, // "cpanel", "plesk", "hestiacp"
+    /// Fetch the archive from this URL instead of requiring the operator SFTP
+    /// it up first (previously the only path — `Migration.tsx` said exactly
+    /// that). The agent downloads it into the same `/var/backups/` tree a
+    /// manually-placed archive already had to live under, then analysis
+    /// proceeds exactly as before.
+    pub url: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -112,6 +121,28 @@ fn emit_step(
 /// replaces a real diagnosis with a generic one.
 const ANALYZE_AGENT_TIMEOUT_SECS: u64 = 1860;
 
+/// Panel-side budget for the agent's URL-fetch call, same "60s longer than the
+/// agent's own ceiling" shape as [`ANALYZE_AGENT_TIMEOUT_SECS`] above — the
+/// agent's `FETCH_TIMEOUT_SECS` is 1800s.
+const FETCH_AGENT_TIMEOUT_SECS: u64 = 1860;
+
+/// Best-effort archive extension for a URL-fetched file's on-disk name —
+/// cosmetic only. The agent's own extractor tries gzip then plain tar
+/// regardless of what this names it, so a wrong guess here fails exactly the
+/// same way a wrong guess in a manually-copied filename already would; this
+/// only makes a failure message that echoes the path read like a real backup
+/// name instead of a bare UUID.
+fn fetch_archive_extension(url: &str) -> &'static str {
+    let lower = url.split(['?', '#']).next().unwrap_or(url).to_ascii_lowercase();
+    if lower.ends_with(".zip") {
+        ".zip"
+    } else if lower.ends_with(".tar") {
+        ".tar"
+    } else {
+        ".tar.gz"
+    }
+}
+
 /// How long to wait for an imported database's engine to start answering.
 ///
 /// A fresh `mariadb:11` initialises its data directory behind a bootstrap server
@@ -145,9 +176,33 @@ pub async fn analyze(
     Json(body): Json<AnalyzeRequest>,
 ) -> Result<(StatusCode, Json<Migration>), ApiError> {
     require_admin(&claims.role)?;
-    let path = body.path.trim();
-    if path.is_empty() {
-        return Err(err(StatusCode::BAD_REQUEST, "Backup path is required"));
+    let path = body.path.trim().to_string();
+    let url = body
+        .url
+        .as_deref()
+        .map(str::trim)
+        .filter(|u| !u.is_empty())
+        .map(str::to_string);
+
+    if path.is_empty() && url.is_none() {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "A backup path, or a URL to fetch it from, is required",
+        ));
+    }
+    if !path.is_empty() && url.is_some() {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "Provide either a path or a URL, not both",
+        ));
+    }
+    if let Some(ref u) = url {
+        if !(u.starts_with("http://") || u.starts_with("https://")) {
+            return Err(err(
+                StatusCode::BAD_REQUEST,
+                "Only http:// and https:// URLs are supported",
+            ));
+        }
     }
 
     let source = body.source.as_deref().unwrap_or("auto");
@@ -158,6 +213,21 @@ pub async fn analyze(
         ));
     }
 
+    // A URL fetch doesn't know its final on-disk path until the download
+    // completes, but `backup_path` is populated from the moment the row
+    // exists (every other reader of this table assumes that). Compute it
+    // deterministically now instead — it doubles as the exact destination the
+    // agent is told to write the file to.
+    let resolved_path = if let Some(ref u) = url {
+        format!(
+            "/var/backups/dockpanel/migration-fetch/{}{}",
+            Uuid::new_v4(),
+            fetch_archive_extension(u)
+        )
+    } else {
+        path.clone()
+    };
+
     // Create migration record (status = analyzing)
     let migration: Migration = sqlx::query_as(
         "INSERT INTO migrations (user_id, server_id, source, status, backup_path) \
@@ -166,24 +236,52 @@ pub async fn analyze(
     .bind(claims.sub)
     .bind(server_id)
     .bind(source)
-    .bind(path)
+    .bind(&resolved_path)
     .fetch_one(&state.db)
     .await
     .map_err(|e| internal_error("analyze", e))?;
-
-    let agent_body = serde_json::json!({
-        "path": path,
-        "source": source,
-    });
 
     let db = state.db.clone();
     let migration_id = migration.id;
     let user_id = claims.sub;
     let email = claims.email.clone();
-    let path_owned = path.to_string();
+    let path_owned = resolved_path.clone();
     let source_owned = source.to_string();
 
     tokio::spawn(async move {
+        // A URL fetch happens first — a failure here is recorded the exact
+        // same way an analyze failure already is below, so the operator sees
+        // one consistent "failed, here's why" in the row instead of this
+        // request hanging on a slow remote host (the same reasoning that
+        // moved analyze itself off the request/response cycle, see the doc
+        // comment above).
+        if let Some(fetch_url) = url {
+            if let Err(e) = agent
+                .post_long(
+                    "/migration/fetch",
+                    Some(serde_json::json!({ "url": fetch_url, "dest": path_owned.clone() })),
+                    FETCH_AGENT_TIMEOUT_SECS,
+                )
+                .await
+            {
+                tracing::error!("Migration {migration_id}: fetch failed: {e}");
+                let _ = sqlx::query(
+                    "UPDATE migrations SET status = 'failed', result = $1, updated_at = NOW() \
+                     WHERE id = $2",
+                )
+                .bind(serde_json::json!({ "error": format!("Could not fetch the archive: {e}") }))
+                .bind(migration_id)
+                .execute(&db)
+                .await;
+                return;
+            }
+        }
+
+        let agent_body = serde_json::json!({
+            "path": path_owned.clone(),
+            "source": source_owned.clone(),
+        });
+
         match agent
             .post_long(
                 "/migration/analyze",

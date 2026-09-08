@@ -4188,9 +4188,22 @@ async fn handle_preview_deploy(
         effective_tls_mode(config.tls_mode.as_deref(), config.ssl_email.as_deref());
     let tls_certificate = config.tls_certificate.clone();
     let branch = branch.to_string();
+    // Same GitHub-status wiring the regular/scheduled deploy paths already use
+    // (`set_github_status`, 9 existing call sites) — a preview builds, deploys
+    // and gets a subdomain today, but nothing tells GitHub a commit or PR where
+    // to find it, so the pusher has to go look in the DockPanel UI instead of
+    // seeing a status check / link on the commit.
+    let github_token = config.github_token.clone();
+    let github_target = preview_domain.as_deref().map(|d| deploy_url(d, effective_mode));
 
     tokio::spawn(async move {
         let branch_slug = dns_label(&branch);
+
+        if let Some(ref gh_token) = github_token {
+            if !gh_token.is_empty() {
+                set_github_status(gh_token, &repo_url, "HEAD", "pending", github_target.clone()).await;
+            }
+        }
 
         // Clone at preview branch
         let mut clone_body = serde_json::json!({
@@ -4214,6 +4227,11 @@ async fn handle_preview_deploy(
                 {
                     tracing::warn!("Failed to update git preview status: {db_err}");
                 }
+                if let Some(ref gh_token) = github_token {
+                    if !gh_token.is_empty() {
+                        set_github_status(gh_token, &repo_url, "HEAD", "failure", github_target.clone()).await;
+                    }
+                }
                 return;
             }
         };
@@ -4234,6 +4252,11 @@ async fn handle_preview_deploy(
                     .bind(deploy_id).bind(&branch).execute(&db).await
                 {
                     tracing::warn!("Failed to update git preview status: {db_err}");
+                }
+                if let Some(ref gh_token) = github_token {
+                    if !gh_token.is_empty() {
+                        set_github_status(gh_token, &repo_url, &commit_hash, "failure", github_target.clone()).await;
+                    }
                 }
                 return;
             }
@@ -4280,6 +4303,11 @@ async fn handle_preview_deploy(
                 {
                     tracing::warn!("Failed to update git preview status: {db_err}");
                 }
+                if let Some(ref gh_token) = github_token {
+                    if !gh_token.is_empty() {
+                        set_github_status(gh_token, &repo_url, &commit_hash, "failure", github_target.clone()).await;
+                    }
+                }
                 return;
             }
         }
@@ -4304,6 +4332,11 @@ async fn handle_preview_deploy(
                     tracing::warn!("Failed to update git preview status: {db_err}");
                 }
                 tracing::info!("Preview deployed: {name}/{branch} -> port {port}");
+                if let Some(ref gh_token) = github_token {
+                    if !gh_token.is_empty() {
+                        set_github_status(gh_token, &repo_url, &commit_hash, "success", github_target.clone()).await;
+                    }
+                }
             }
             Err(e) => {
                 tracing::error!("Preview deploy failed: {name}/{branch}: {e}");
@@ -4311,6 +4344,11 @@ async fn handle_preview_deploy(
                     .bind(deploy_id).bind(&branch).execute(&db).await
                 {
                     tracing::warn!("Failed to update git preview status: {db_err}");
+                }
+                if let Some(ref gh_token) = github_token {
+                    if !gh_token.is_empty() {
+                        set_github_status(gh_token, &repo_url, &commit_hash, "failure", github_target.clone()).await;
+                    }
                 }
             }
         }

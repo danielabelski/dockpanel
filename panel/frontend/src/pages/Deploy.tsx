@@ -43,6 +43,7 @@ interface ReleaseInfo {
 
 export default function Deploy() {
   const { id } = useParams<{ id: string }>();
+  const [siteDomain, setSiteDomain] = useState<string | null>(null);
   const [config, setConfig] = useState<DeployConfig | null>(null);
   const [logs, setLogs] = useState<DeployLog[]>([]);
   const [releases, setReleases] = useState<ReleaseInfo[]>([]);
@@ -114,6 +115,13 @@ export default function Deploy() {
   };
 
   useEffect(() => { load(); }, [id]);
+
+  // Breadcrumb-only: the domain, not the site's full record — same
+  // best-effort fetch Backups.tsx/Crons.tsx/Files.tsx already do for their
+  // own "Sites / {domain} / ..." trail.
+  useEffect(() => {
+    api.get<{ domain: string }>(`/sites/${id}`).then((s) => setSiteDomain(s.domain)).catch(() => {});
+  }, [id]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -238,7 +246,7 @@ export default function Deploy() {
       <div>
         <Link to="/sites" className="text-sm text-dark-200 hover:text-dark-100">Sites</Link>
         <span className="text-sm text-dark-300 mx-2">/</span>
-        <Link to={`/sites/${id}`} className="text-sm text-dark-200 hover:text-dark-100">Site</Link>
+        <Link to={`/sites/${id}`} className="text-sm text-dark-200 hover:text-dark-100 font-mono">{siteDomain || "Site"}</Link>
         <span className="text-sm text-dark-300 mx-2">/</span>
         <span className="text-sm text-dark-50 font-medium">Git Deploy</span>
       </div>

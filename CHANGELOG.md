@@ -4,6 +4,41 @@ All notable changes to DockPanel will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.239.0]
+
+### Git Deploy previews now report status to GitHub
+
+Preview deployments (isolated per-branch containers, their own subdomain, TTL auto-cleanup) have
+worked end to end since v2.53-2.55 — but the one place a pusher would actually look, GitHub's own
+commit/PR view, never heard about any of it. `set_github_status` — the same call regular and
+scheduled deploys have used at 9 sites all along — now fires at every preview outcome: pending
+when the clone starts, success when the deploy comes up, failure on a clone, build, TLS-readiness,
+or deploy failure. Every call routes through the existing `deploy_url` resolver, computed once per
+push rather than re-derived per call site, so a preview link can never carry a hardcoded scheme.
+
+### Migration Wizard: fetch a backup archive by URL
+
+Importing from cPanel, Plesk, or HestiaCP required uploading the archive to the server via SFTP
+first, then pasting the resulting path — the only path `POST /api/migration/analyze` ever accepted.
+It now also accepts a URL: the agent downloads the archive itself into the one subtree it can
+actually write under systemd's sandbox (`/var/backups/dockpanel/migration-fetch/`), then analysis
+proceeds exactly as before. The fetch is SSRF-guarded (the same host check `git_build.rs`'s repo-url
+dialing uses, re-validated independently on the agent side rather than trusted from the panel),
+scheme-restricted to `http(s)://`, and size-capped on both the declared `Content-Length` and the
+actual streamed byte count — a `.part` file is renamed into place only once the full response has
+landed, so a crash or a cap trip can never be mistaken for a complete archive by the analyzer.
+
+### Small fixes
+
+- The armv7l (32-bit ARM) install refusal is correct and intentional — only 64-bit ARM64 binaries
+  are published (GH #126).
+- Git Deploy's New/Edit modal widened (`max-w-lg` → `max-w-2xl`) for editing long `.env` values and
+  connection strings comfortably (GH #128).
+- The Git Deploy breadcrumb inside a site now shows the site's real domain instead of the literal
+  word "Site" (GH #128).
+- README now disambiguates from the unrelated WPF/WinForms `DockPanel` docking control near the top
+  (GH #127).
+
 ## [2.238.0]
 
 ### Per-site SFTP accounts (GH #108)

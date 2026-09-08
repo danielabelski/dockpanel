@@ -1130,7 +1130,7 @@ export default function GitDeploys() {
           <div className="absolute inset-0 bg-black/60 dp-modal-overlay" onClick={() => { setShowModal(false); resetForm(); }} />
 
           {/* Modal card */}
-          <div className="relative bg-dark-800 rounded-lg border border-dark-500 w-full max-w-lg max-h-[90vh] overflow-y-auto animate-fade-up dp-modal">
+          <div className="relative bg-dark-800 rounded-lg border border-dark-500 w-full max-w-2xl max-h-[90vh] overflow-y-auto animate-fade-up dp-modal">
             <div className="px-5 py-4 border-b border-dark-600 flex items-center justify-between">
               <h2 className="text-xs font-medium text-dark-300 uppercase font-mono tracking-widest">
                 {editing ? "Edit Deploy" : "New Deploy"}

@@ -163,6 +163,11 @@ The **GitHub Token** on the deploy form is **not** a clone credential. It is use
 only to post commit statuses back to GitHub after a deploy, so a commit shows a
 green tick. Leaving it empty changes nothing about cloning.
 
+This includes preview deployments (below), not just regular and scheduled
+deploys: a pending status is posted when a pushed branch starts building, and
+success or failure when it finishes, with a link back to the live preview URL
+so the status check on GitHub's own commit/PR view is clickable.
+
 ## Persistent Volumes
 
 **By default a Git Deploy container has no volumes and no bind mounts, and
