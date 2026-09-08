@@ -133,6 +133,15 @@ pub struct Site {
     pub csp_policy: Option<String>,
     pub permissions_policy: Option<String>,
     pub bot_protection: String,
+    /// Monthly bandwidth cap in MB. NULL = unlimited (default). Read by
+    /// `traffic_accounting_scheduler` against the current month's
+    /// `site_traffic_usage` row.
+    pub bandwidth_quota_mb: Option<i32>,
+    /// Set the instant the scheduler auto-disables this site for exceeding
+    /// `bandwidth_quota_mb`; the only thing distinguishing that from a manual
+    /// disable. Cleared by a manual re-enable, a quota raise/removal, or a new
+    /// calendar month.
+    pub bandwidth_suspended_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

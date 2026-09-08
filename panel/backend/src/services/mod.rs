@@ -13,6 +13,7 @@ pub mod deploy_scheduler;
 pub mod domain_claim;
 pub mod drift;
 pub mod drill_scheduler;
+pub mod traffic_accounting_scheduler;
 pub mod email;
 pub mod image_scanner;
 pub mod wp_vuln_scanner;

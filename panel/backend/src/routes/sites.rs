@@ -1797,6 +1797,11 @@ pub struct UpdateLimitsRequest {
     pub php_memory_mb: Option<i32>,
     pub php_max_workers: Option<i32>,
     pub custom_nginx: Option<String>,
+    /// NULL = unlimited. Mirrors `rate_limit`'s convention: the settings form
+    /// always echoes this back on save, so its absence means "unlimited" the
+    /// same way an unset `rate_limit` means "no rate limit" — never "leave
+    /// whatever was there".
+    pub bandwidth_quota_mb: Option<i32>,
 }
 
 pub async fn update_limits(
@@ -1841,16 +1846,55 @@ pub async fn update_limits(
         }
     }
 
+    if let Some(q) = body.bandwidth_quota_mb
+        && q < 1
+    {
+        return Err(err(StatusCode::BAD_REQUEST, "Bandwidth quota must be at least 1 MB"));
+    }
+
+    // A quota edit that lifts a site out of over-quota territory (raised the
+    // cap, or removed it) shouldn't leave the site disabled until the
+    // traffic_accounting_scheduler's next tick (up to 5 minutes) notices —
+    // recover it here, in the same request, when that's now the case.
+    let recovering = if site.bandwidth_suspended_at.is_some() {
+        match body.bandwidth_quota_mb {
+            None => true,
+            Some(q) => {
+                let year_month = chrono::Utc::now().format("%Y-%m").to_string();
+                let used: i64 = sqlx::query_scalar(
+                    "SELECT bytes_used FROM site_traffic_usage WHERE site_id = $1 AND year_month = $2",
+                )
+                .bind(id)
+                .bind(&year_month)
+                .fetch_optional(&state.db)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or(0);
+                used <= (q as i64) * 1024 * 1024
+            }
+        }
+    } else {
+        false
+    };
+    let new_enabled = if recovering { true } else { site.enabled };
+    let new_suspended_at: Option<chrono::DateTime<chrono::Utc>> =
+        if recovering { None } else { site.bandwidth_suspended_at };
+
     let custom_nginx = body.custom_nginx.as_deref();
     let updated: Site = sqlx::query_as(
         "UPDATE sites SET rate_limit = $1, max_upload_mb = $2, php_memory_mb = $3, php_max_workers = $4, \
-         custom_nginx = $5, updated_at = NOW() WHERE id = $6 RETURNING *",
+         custom_nginx = $5, bandwidth_quota_mb = $6, enabled = $7, bandwidth_suspended_at = $8, \
+         updated_at = NOW() WHERE id = $9 RETURNING *",
     )
     .bind(body.rate_limit)
     .bind(max_upload)
     .bind(php_memory)
     .bind(php_workers)
     .bind(custom_nginx)
+    .bind(body.bandwidth_quota_mb)
+    .bind(new_enabled)
+    .bind(new_suspended_at)
     .bind(id)
     .fetch_one(&state.db)
     .await
@@ -1867,6 +1911,20 @@ pub async fn update_limits(
         .await
         .map_err(|e| agent_error("Resource limits", e))?;
 
+    if recovering {
+        if let Err(e) = agent.post(&format!("/nginx/sites/{}/enable", site.domain), None).await {
+            tracing::warn!(
+                "Bandwidth quota update: failed to re-enable {} at the agent after lifting suspension: {e}",
+                site.domain
+            );
+        } else {
+            activity::log_activity(
+                &state.db, claims.sub, &claims.email, "site.bandwidth_suspension_lifted",
+                Some("site"), Some(&site.domain), Some("quota raised or removed"), None,
+            ).await;
+        }
+    }
+
     tracing::info!("Resource limits updated for {}", site.domain);
     activity::log_activity(
         &state.db, claims.sub, &claims.email, "site.limits",
@@ -1874,6 +1932,52 @@ pub async fn update_limits(
     ).await;
 
     Ok(Json(updated))
+}
+
+/// GET /api/sites/{id}/bandwidth-usage — current-month bytes used against
+/// quota, suspension state, and up to 12 months of history for the usage chart.
+pub async fn bandwidth_usage(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let site: Site = sqlx::query_as(SITE_FOR_CALLER_ALL.as_str())
+        .bind(id)
+        .bind(claims.sub)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| internal_error("bandwidth usage", e))?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "Site not found"))?;
+
+    let year_month = chrono::Utc::now().format("%Y-%m").to_string();
+    let used_this_month: i64 = sqlx::query_scalar(
+        "SELECT bytes_used FROM site_traffic_usage WHERE site_id = $1 AND year_month = $2",
+    )
+    .bind(id)
+    .bind(&year_month)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| internal_error("bandwidth usage", e))?
+    .unwrap_or(0i64);
+
+    let history: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT year_month, bytes_used FROM site_traffic_usage WHERE site_id = $1 \
+         ORDER BY year_month DESC LIMIT 12",
+    )
+    .bind(id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| internal_error("bandwidth usage", e))?;
+
+    Ok(Json(serde_json::json!({
+        "quota_mb": site.bandwidth_quota_mb,
+        "used_bytes_this_month": used_this_month,
+        "suspended_at": site.bandwidth_suspended_at,
+        "year_month": year_month,
+        "history": history.into_iter()
+            .map(|(ym, b)| serde_json::json!({ "year_month": ym, "bytes_used": b }))
+            .collect::<Vec<_>>(),
+    })))
 }
 
 /// DELETE /api/sites/{id} — Delete a site and all associated resources.
@@ -3302,8 +3406,15 @@ pub async fn toggle_enabled(
         None,
     ).await.map_err(|e| agent_error("Toggle site", e))?;
 
-    // Update DB
-    sqlx::query("UPDATE sites SET enabled = $1, updated_at = NOW() WHERE id = $2")
+    // Update DB. A manual re-enable also clears bandwidth_suspended_at: without
+    // this, `traffic_accounting_scheduler` would see a lingering suspended_at
+    // and treat the site as still under active bandwidth suspension (never
+    // re-checking its quota), even though a human just turned it back on. A
+    // manual disable leaves the flag untouched — that path never sets it.
+    sqlx::query(
+        "UPDATE sites SET enabled = $1, bandwidth_suspended_at = CASE WHEN $1 THEN NULL ELSE bandwidth_suspended_at END, \
+         updated_at = NOW() WHERE id = $2",
+    )
         .bind(enabled)
         .bind(id)
         .execute(&state.db)

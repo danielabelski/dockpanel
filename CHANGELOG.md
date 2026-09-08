@@ -4,6 +4,38 @@ All notable changes to DockPanel will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.237.0]
+
+### Per-site bandwidth quota and traffic accounting (GH #84)
+
+Sites can now be given a monthly bandwidth cap (MB), set in the same Resource Limits panel as rate
+limiting and max upload size. Usage is shown as a live progress bar (green/amber/red as it
+approaches the cap) alongside the other limits, and a site that exceeds its quota is automatically
+disabled — the same mechanism as a manual toggle — with a clear reason on the disabled banner
+rather than a generic "site is disabled" message.
+
+The accounting itself is a durable monthly accumulator (`site_traffic_usage`), built by a new
+`traffic_accounting_scheduler` background service (5-minute interval) that asks each site's agent
+for bytes transferred since a persisted checkpoint (`site_traffic_offsets`). The agent's new
+`GET /nginx/site-traffic-delta/{domain}` endpoint computes that delta directly from the nginx access
+log, correctly crossing a daily logrotate rotation: the just-rotated `.1` file (kept plain-text for
+one more cycle by `delaycompress`) is read for its remaining unaccounted bytes before the fresh
+current file is read from the start. The checkpoint offset never advances past an in-progress,
+not-yet-newline-terminated log line — advancing past one would both corrupt the running byte sum
+(parsing a truncated size field) and permanently skip that request, so a partial line is left for the
+next poll to re-read complete instead.
+
+A site is suspended for exceeding its quota exactly once per over-quota episode, not re-suspended
+(and re-notified) on every tick while it stays over. Three independent paths restore it: a new
+calendar month starts, the quota is raised or removed (checked immediately when the operator saves
+the new limit, not on the next 5-minute tick), or a human manually re-enables it — the last of which
+required fixing a related gap in the existing manual toggle: it used to leave a stale
+`bandwidth_suspended_at` behind on re-enable, which would have shadowed the scheduler's own
+over-quota check forever (it only re-evaluates a site once that field is cleared).
+
+New mutation-tested pin (`bandwidth-quota-pin-e2e.sh`, 31 assertions) pins the partial-line safety
+property, the suspend-once guard, all three recovery paths, and the manual-toggle fix.
+
 ## [2.236.0]
 
 ### AI-assisted build/deploy failure diagnosis (BYO API key)

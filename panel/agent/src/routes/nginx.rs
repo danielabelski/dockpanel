@@ -1778,6 +1778,141 @@ async fn site_stats(Path(domain): Path<String>) -> Result<Json<serde_json::Value
     })))
 }
 
+#[derive(serde::Deserialize)]
+struct TrafficDeltaQuery {
+    last_inode: Option<u64>,
+    last_size: Option<u64>,
+}
+
+/// Extract the response-size field from one `combined`-format access-log line
+/// (`... "METHOD /path HTTP/x.x" STATUS SIZE ...`).
+fn parse_log_line_size(line: &str) -> Option<u64> {
+    let rest = line.split("\" ").nth(1)?;
+    rest.split_whitespace().nth(1)?.parse::<u64>().ok()
+}
+
+/// Read `path` starting at byte offset `from`, sum the response-size field of
+/// every COMPLETE line found, and return `(bytes_summed, new_offset)`.
+///
+/// `new_offset` only advances to the last `\n` actually present in what was
+/// read — never to whatever `tail` happened to return. nginx can still be
+/// mid-write on the final line when this runs; a partial line's bytes are left
+/// unconsumed so the NEXT poll re-reads it complete, rather than this poll
+/// parsing a truncated size field (which is the number being summed, so a
+/// truncated one corrupts the total, not just under-counts a request) and then
+/// permanently skipping past it.
+async fn read_and_advance(path: &str, from: u64) -> (u64, u64) {
+    let output = match safe_command("tail")
+        .args(["-c", &format!("+{}", from + 1), path])
+        .output()
+        .await
+    {
+        Ok(o) => o,
+        Err(_) => return (0, from),
+    };
+    let bytes = &output.stdout;
+    let Some(last_nl) = bytes.iter().rposition(|&b| b == b'\n') else {
+        return (0, from);
+    };
+    let complete = &bytes[..=last_nl];
+    let sum: u64 = String::from_utf8_lossy(complete)
+        .lines()
+        .filter(|l| !l.is_empty())
+        .filter_map(parse_log_line_size)
+        .sum();
+    (sum, from + complete.len() as u64)
+}
+
+/// GET /nginx/site-traffic-delta/{domain}?last_inode=&last_size= — bytes
+/// transferred since the caller's last checkpoint, crossing a log rotation if
+/// one happened in between.
+///
+/// Stateless by design (mirrors `site_stats`): the caller (the backend's
+/// `traffic_accounting_scheduler`) owns the checkpoint and persists it
+/// centrally, because the agent itself has no durable store that survives a
+/// restart or reinstall. `last_inode`/`last_size` absent means "first poll ever
+/// for this site" — nothing to diff against, so this reads whatever the CURRENT
+/// file holds (bounded to at most today's traffic, since the file rotates
+/// daily) rather than reaching into rotated history no checkpoint ever priced in.
+///
+/// Only ONE rotation is reconciled per call. `delaycompress` keeps the
+/// just-rotated file plain-text as `.1` for one more rotation cycle (about a
+/// day) — long enough for any reasonable poll interval — but if the caller goes
+/// quiet for longer than that, the tail end of whatever rotated out from under
+/// it is dropped rather than guessed at from `.2.gz` onward: an inode neither
+/// the current file nor `.1` matches isn't "rotated once", it's "rotated an
+/// unknown number of times", and reconstructing that from compressed history
+/// for a byte-accounting feature would manufacture a number that looks precise
+/// and isn't.
+async fn site_traffic_delta(
+    Path(domain): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<TrafficDeltaQuery>,
+) -> Result<Json<serde_json::Value>, ApiErr> {
+    if !super::is_valid_domain(&domain) {
+        return Err(api_err(StatusCode::BAD_REQUEST, "Invalid domain format"));
+    }
+    let log_file = format!("/var/log/nginx/{domain}.access.log");
+
+    use std::os::unix::fs::MetadataExt;
+    let cur_inode = match std::fs::metadata(&log_file) {
+        Ok(m) => m.ino(),
+        Err(_) => {
+            return Ok(Json(serde_json::json!({
+                "inode": 0, "size": 0, "delta_bytes": 0, "rotated": false,
+            })));
+        }
+    };
+
+    let (delta, new_offset, rotated) = match q.as_pair() {
+        Some((last_inode, last_size)) if last_inode == cur_inode => {
+            let (d, off) = read_and_advance(&log_file, last_size).await;
+            (d, off, false)
+        }
+        Some((last_inode, last_size)) => {
+            // Inode changed: rotation happened. The rotated predecessor lives at
+            // `.1` (uncompressed — delaycompress) as long as this poll lands
+            // within one rotation cycle of the previous one.
+            let mut carried = 0u64;
+            let rotated_file = format!("/var/log/nginx/{domain}.access.log.1");
+            // If `.1`'s inode doesn't match, it has already rotated again
+            // (missed more than one cycle) — the tail from the old checkpoint
+            // is unrecoverable, by design (see the doc comment above).
+            if let Ok(rmeta) = std::fs::metadata(&rotated_file)
+                && rmeta.ino() == last_inode
+            {
+                let (d, _) = read_and_advance(&rotated_file, last_size).await;
+                carried = d;
+            }
+            // The new current file is entirely unaccounted for — read it whole.
+            let (d2, off2) = read_and_advance(&log_file, 0).await;
+            (carried + d2, off2, true)
+        }
+        None => {
+            // First poll ever for this site: no checkpoint to diff against.
+            let (d, off) = read_and_advance(&log_file, 0).await;
+            (d, off, false)
+        }
+    };
+
+    Ok(Json(serde_json::json!({
+        "inode": cur_inode,
+        "size": new_offset,
+        "delta_bytes": delta,
+        "rotated": rotated,
+    })))
+}
+
+// Local helper: `Option<(u64, u64)>` from the two independently-optional query
+// params — either both are present (a real checkpoint) or the caller has none.
+impl TrafficDeltaQuery {
+    fn as_pair(&self) -> Option<(u64, u64)> {
+        match (self.last_inode, self.last_size) {
+            (Some(i), Some(s)) => Some((i, s)),
+            _ => None,
+        }
+    }
+}
+
 /// GET /nginx/php-errors/{domain} — Get PHP-FPM error log for a site.
 async fn php_errors(
     Path(domain): Path<String>,
@@ -2637,10 +2772,131 @@ pub fn router() -> Router<AppState> {
         // Site Logs & Stats
         .route("/nginx/site-logs/{domain}", get(site_logs))
         .route("/nginx/site-stats/{domain}", get(site_stats))
+        .route("/nginx/site-traffic-delta/{domain}", get(site_traffic_delta))
         .route("/nginx/last-activity/{domain}", get(last_activity))
         .route("/nginx/php-errors/{domain}", get(php_errors))
         // Site Cloning
         .route("/nginx/clone-site", post(clone_site))
         // Environment Variables
         .route("/nginx/env/{domain}", get(get_env).put(set_env))
+}
+
+#[cfg(test)]
+mod traffic_delta_tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn parse_log_line_size_extracts_the_response_size_field() {
+        let line = r#"1.2.3.4 - - [08/Sep/2026:10:00:00 +0000] "GET /index.html HTTP/1.1" 200 4521 "-" "curl/8.0""#;
+        assert_eq!(parse_log_line_size(line), Some(4521));
+    }
+
+    #[test]
+    fn parse_log_line_size_rejects_a_line_with_no_quoted_request() {
+        assert_eq!(parse_log_line_size("not a log line"), None);
+    }
+
+    #[test]
+    fn parse_log_line_size_rejects_a_non_numeric_size_field() {
+        let line = r#"1.2.3.4 - - [x] "GET / HTTP/1.1" 200 not-a-number "-" "-""#;
+        assert_eq!(parse_log_line_size(line), None);
+    }
+
+    fn write_temp(content: &[u8]) -> std::path::PathBuf {
+        // Tests run concurrently in the same process, so PID + a coarse
+        // timestamp isn't unique enough — an atomic counter is.
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "dockpanel-traffic-delta-test-{}-{n}",
+            std::process::id()
+        ));
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(content).unwrap();
+        f.sync_all().unwrap();
+        path
+    }
+
+    fn log_line(size: u64) -> String {
+        format!(
+            "1.2.3.4 - - [08/Sep/2026:10:00:00 +0000] \"GET / HTTP/1.1\" 200 {size} \"-\" \"-\"\n"
+        )
+    }
+
+    #[tokio::test]
+    async fn read_and_advance_sums_complete_lines_from_the_given_offset() {
+        let l1 = log_line(100);
+        let l2 = log_line(250);
+        let content = format!("{l1}{l2}");
+        let path = write_temp(content.as_bytes());
+
+        let (sum, new_offset) = read_and_advance(path.to_str().unwrap(), 0).await;
+        assert_eq!(sum, 350);
+        assert_eq!(new_offset, content.len() as u64);
+
+        // A second read starting at the returned offset finds nothing new.
+        let (sum2, offset2) = read_and_advance(path.to_str().unwrap(), new_offset).await;
+        assert_eq!(sum2, 0);
+        assert_eq!(offset2, new_offset);
+
+        std::fs::remove_file(path).ok();
+    }
+
+    #[tokio::test]
+    async fn read_and_advance_only_counts_bytes_after_the_given_offset() {
+        let l1 = log_line(100);
+        let l2 = log_line(250);
+        let content = format!("{l1}{l2}");
+        let path = write_temp(content.as_bytes());
+
+        // Simulate having already consumed the first line.
+        let (sum, new_offset) = read_and_advance(path.to_str().unwrap(), l1.len() as u64).await;
+        assert_eq!(sum, 250);
+        assert_eq!(new_offset, content.len() as u64);
+
+        std::fs::remove_file(path).ok();
+    }
+
+    #[tokio::test]
+    async fn read_and_advance_leaves_a_partial_trailing_line_unconsumed() {
+        let complete = log_line(100);
+        // No trailing newline: nginx caught mid-write.
+        let partial = r#"5.6.7.8 - - [x] "GET /still-writing HTTP/1.1" 200 99"#;
+        let content = format!("{complete}{partial}");
+        let path = write_temp(content.as_bytes());
+
+        let (sum, new_offset) = read_and_advance(path.to_str().unwrap(), 0).await;
+        // Only the complete line is counted...
+        assert_eq!(sum, 100);
+        // ...and the offset stops right after it, NOT at end-of-file — so the
+        // partial line's bytes are re-read (and get counted) once it's finished.
+        assert_eq!(new_offset, complete.len() as u64);
+        assert!(new_offset < content.len() as u64);
+
+        std::fs::remove_file(path).ok();
+    }
+
+    #[tokio::test]
+    async fn read_and_advance_on_a_missing_file_returns_zero_and_the_same_offset() {
+        let (sum, offset) = read_and_advance("/nonexistent/dockpanel-test-path.log", 42).await;
+        assert_eq!(sum, 0);
+        assert_eq!(offset, 42);
+    }
+
+    #[test]
+    fn traffic_delta_query_as_pair_requires_both_fields() {
+        assert_eq!(
+            TrafficDeltaQuery { last_inode: Some(1), last_size: Some(2) }.as_pair(),
+            Some((1, 2))
+        );
+        assert_eq!(
+            TrafficDeltaQuery { last_inode: Some(1), last_size: None }.as_pair(),
+            None
+        );
+        assert_eq!(
+            TrafficDeltaQuery { last_inode: None, last_size: None }.as_pair(),
+            None
+        );
+    }
 }

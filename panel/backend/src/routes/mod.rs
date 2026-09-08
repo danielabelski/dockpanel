@@ -1125,6 +1125,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/sites/{id}/php", put(sites::switch_php))
         .route("/api/sites/{id}/runtime", put(sites::switch_runtime))
         .route("/api/sites/{id}/limits", put(sites::update_limits))
+        .route("/api/sites/{id}/bandwidth-usage", get(sites::bandwidth_usage))
         .route("/api/sites/{id}/domain", put(sites::rename_domain))
         .route("/api/sites/{id}/transfer", post(sites::transfer))
         .route("/api/sites/{id}/toggle", put(sites::toggle_enabled))

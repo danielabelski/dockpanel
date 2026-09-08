@@ -18,6 +18,8 @@ interface Site {
   ssl_expiry: string | null;
   rate_limit: number | null;
   max_upload_mb: number;
+  bandwidth_quota_mb: number | null;
+  bandwidth_suspended_at: string | null;
   php_memory_mb: number;
   php_max_workers: number;
   custom_nginx: string | null;
@@ -99,6 +101,11 @@ export default function SiteDetail() {
   const [limitsMessage, setLimitsMessage] = useState("");
   const [rateLimit, setRateLimit] = useState<string>("");
   const [maxUpload, setMaxUpload] = useState("64");
+  const [bandwidthQuota, setBandwidthQuota] = useState<string>("");
+  const [bandwidthUsage, setBandwidthUsage] = useState<{
+    used_bytes_this_month: number;
+    year_month: string;
+  } | null>(null);
   const [phpMemory, setPhpMemory] = useState("256");
   const [phpWorkers, setPhpWorkers] = useState("5");
   const [customNginx, setCustomNginx] = useState("");
@@ -427,6 +434,7 @@ export default function SiteDetail() {
         setCspPolicy(s.csp_policy || "");
         setPermsPolicy(s.permissions_policy || "");
         setBotMode(s.bot_protection || "off");
+        setBandwidthQuota(s.bandwidth_quota_mb != null ? String(s.bandwidth_quota_mb) : "");
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
@@ -434,6 +442,10 @@ export default function SiteDetail() {
     loadRedirects();
     loadProtected();
     loadAliases();
+    api
+      .get<{ used_bytes_this_month: number; year_month: string }>(`/sites/${id}/bandwidth-usage`)
+      .then(setBandwidthUsage)
+      .catch(() => setBandwidthUsage(null));
   }, [id]);
 
   const handleDelete = async () => {
@@ -751,15 +763,19 @@ export default function SiteDetail() {
       {/* Disabled banner */}
       {site.enabled === false && (
         <div className="mb-4 px-4 py-3 rounded-lg text-sm bg-warn-500/10 text-warn-500 border border-warn-500/20 flex items-center justify-between">
-          <span>This site is currently disabled. Visitors see a 503 maintenance page.</span>
+          <span>
+            {site.bandwidth_suspended_at
+              ? `This site was automatically disabled on ${formatDate(site.bandwidth_suspended_at)} for exceeding its monthly bandwidth quota (${site.bandwidth_quota_mb} MB). Visitors see a 503 maintenance page. Raise the quota below to restore it immediately, or it restores automatically next month.`
+              : "This site is currently disabled. Visitors see a 503 maintenance page."}
+          </span>
           <button disabled={toggling} onClick={async () => {
             setToggling(true);
             try {
               await api.put(`/sites/${id}/toggle`, { enabled: true });
-              setSite(s => s ? { ...s, enabled: true } : s);
+              setSite(s => s ? { ...s, enabled: true, bandwidth_suspended_at: null } : s);
             } catch (e) { setError(e instanceof Error ? e.message : "Enable failed"); }
             finally { setToggling(false); }
-          }} className="px-3 py-1 bg-rust-500 text-white rounded text-xs font-medium hover:bg-rust-600 disabled:opacity-50">
+          }} className="px-3 py-1 bg-rust-500 text-white rounded text-xs font-medium hover:bg-rust-600 disabled:opacity-50 shrink-0 ml-3">
             {toggling ? "..." : "Enable Now"}
           </button>
         </div>
@@ -1408,6 +1424,17 @@ export default function SiteDetail() {
                   className="w-full px-3 py-2 border border-dark-500 rounded-lg text-sm focus:ring-2 focus:ring-accent-500 focus:border-accent-500 outline-none"
                 />
               </div>
+              <div>
+                <label className="block text-xs font-medium text-dark-200 mb-1">Bandwidth Quota (MB/mo)</label>
+                <input
+                  type="number"
+                  value={bandwidthQuota}
+                  onChange={(e) => setBandwidthQuota(e.target.value)}
+                  placeholder="Unlimited"
+                  min="1"
+                  className="w-full px-3 py-2 border border-dark-500 rounded-lg text-sm focus:ring-2 focus:ring-accent-500 focus:border-accent-500 outline-none"
+                />
+              </div>
               {site.runtime === "php" && (
                 <>
                   <div>
@@ -1453,10 +1480,42 @@ export default function SiteDetail() {
               </p>
             </div>
 
+            {bandwidthUsage && (
+              <div>
+                <div className="flex items-center justify-between text-xs text-dark-300 mb-1">
+                  <span>
+                    Bandwidth this month ({bandwidthUsage.year_month}):{" "}
+                    {(bandwidthUsage.used_bytes_this_month / 1024 / 1024).toFixed(1)} MB
+                    {site.bandwidth_quota_mb ? ` of ${site.bandwidth_quota_mb} MB` : " (unlimited)"}
+                  </span>
+                </div>
+                {site.bandwidth_quota_mb != null && (
+                  <div className="w-full h-1.5 bg-dark-700 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full ${
+                        bandwidthUsage.used_bytes_this_month / 1024 / 1024 > site.bandwidth_quota_mb
+                          ? "bg-danger-500"
+                          : bandwidthUsage.used_bytes_this_month / 1024 / 1024 > site.bandwidth_quota_mb * 0.8
+                          ? "bg-warn-500"
+                          : "bg-rust-500"
+                      }`}
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          (bandwidthUsage.used_bytes_this_month / 1024 / 1024 / site.bandwidth_quota_mb) * 100
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="flex items-center justify-between">
               <p className="text-xs text-dark-300">
                 {rateLimit ? `${rateLimit} req/s per IP` : "No rate limit"} · {maxUpload} MB uploads
                 {site.runtime === "php" ? ` · ${phpMemory} MB memory · ${phpWorkers} workers` : ""}
+                {bandwidthQuota ? ` · ${bandwidthQuota} MB/mo bandwidth` : " · Unlimited bandwidth"}
               </p>
               <div className="flex items-center gap-3">
                 {limitsMessage && (
@@ -1476,9 +1535,14 @@ export default function SiteDetail() {
                         php_memory_mb: parseInt(phpMemory) || 256,
                         php_max_workers: parseInt(phpWorkers) || 5,
                         custom_nginx: customNginx || null,
+                        bandwidth_quota_mb: bandwidthQuota ? parseInt(bandwidthQuota) : null,
                       });
                       setSite(updated);
-                      setLimitsMessage("Limits saved");
+                      setLimitsMessage(
+                        updated.enabled && site.enabled === false
+                          ? "Limits saved — site re-enabled"
+                          : "Limits saved"
+                      );
                     } catch (err) {
                       setLimitsMessage(err instanceof Error ? err.message : "Save failed");
                     } finally {

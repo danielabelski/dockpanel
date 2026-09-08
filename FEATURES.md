@@ -1,6 +1,6 @@
 # DockPanel Feature Manifest
 
-> **Version**: v2.236.0 | **Total**: 60+ major features, ~285 capabilities
+> **Version**: v2.237.0 | **Total**: 60+ major features, ~285 capabilities
 >
 > This file is the single source of truth for what DockPanel offers.
 > Update it whenever features are added, changed, or removed.
@@ -100,7 +100,7 @@
 | **OAuth/SSO** | Google, GitHub, GitLab OAuth 2.0 with auto-create | `routes/oauth.rs` | (in Login) |
 | **Branding** | Public `/api/branding` with panel name, logo, colors, OAuth providers | `routes/settings.rs` | `BrandingContext.tsx` |
 
-## Background Services (16 supervised)
+## Background Services (17 supervised)
 
 | Service | Interval | Purpose |
 |---------|----------|---------|
@@ -120,6 +120,7 @@
 | `drill_scheduler` | per policy | Run scheduled restore drills against real backups |
 | `telemetry_collector` | daily | Collect anonymous usage telemetry (opt-in, off by default) |
 | `cleanup` | 3600s | Expire provision logs and their deploy-owner rows |
+| `traffic_accounting_scheduler` | 300s | Accumulate per-site monthly bandwidth from access logs, enforce `bandwidth_quota_mb` |
 
 ## CLI Commands
 
@@ -239,11 +240,11 @@ honest:
 | Panel services RAM (agent + API) | ~49 MB | measured | 2026-07-27 |
 | Full-stack RAM (with bundled PostgreSQL) | ~109 MB | measured | 2026-07-27 |
 | App templates | 147 | derived | every commit |
-| HTTP routes | 831 (541 backend + 290 agent) | derived | every commit |
-| Regression-pin assertions | 4426 (133 suites) | derived | every commit |
+| HTTP routes | 833 (542 backend + 291 agent) | derived | every commit |
+| Regression-pin assertions | 4457 (134 suites) | derived | every commit |
 | Frontend pages | 52 | derived | every commit |
-| DB migrations | 134 | derived | every commit |
-| Supervised background services | 16 | derived | every commit |
+| DB migrations | 135 | derived | every commit |
+| Supervised background services | 17 | derived | every commit |
 
 Five of these were wrong when the register was built (s272), some by a factor of
 three, and one — the panel's own memory footprint, the headline claim of the

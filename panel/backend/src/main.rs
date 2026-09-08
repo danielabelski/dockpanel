@@ -464,6 +464,11 @@ async fn main() {
     let (s_db, s_agents) = (state.db.clone(), state.agents.clone());
     spawn_supervised("drill_scheduler", &shutdown_tx, move |rx| services::drill_scheduler::run(s_db.clone(), s_agents.clone(), rx));
 
+    // Each site's access log lives on the server that owns it, so this too takes
+    // the registry. See `traffic_accounting_scheduler::collect_one`.
+    let (s_db, s_agents) = (state.db.clone(), state.agents.clone());
+    spawn_supervised("traffic_accounting_scheduler", &shutdown_tx, move |rx| services::traffic_accounting_scheduler::run(s_db.clone(), s_agents.clone(), rx));
+
     // Local BY INTENT, not by omission: it diagnoses the panel host itself. It takes
     // the registry so that intent is stated in the type and calls `agents.local()`.
     let (s_db, s_agents) = (state.db.clone(), state.agents.clone());

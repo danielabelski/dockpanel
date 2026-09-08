@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>The most feature-packed free server panel ever built.</strong><br>
-  Self-hosted. Docker-native. Written in Rust. Panel services run on <strong>~49MB of RAM</strong>. 831 HTTP routes. 147 app templates. 4426 regression assertions. ~51MB binaries. Zero subscriptions.
+  Self-hosted. Docker-native. Written in Rust. Panel services run on <strong>~49MB of RAM</strong>. 833 HTTP routes. 147 app templates. 4457 regression assertions. ~51MB binaries. Zero subscriptions.
 </p>
 
 <p align="center">
@@ -242,7 +242,7 @@ Browser → React 19 SPA → Nginx
                            └── /*     → Frontend (static files)
 ```
 
-**3 Rust binaries**: Agent (~21MB), API (~25MB), CLI (~3.9MB). Runtime RAM: ~35MB agent + ~14MB API ≈ 49MB for the panel itself; ~109MB with the bundled PostgreSQL. 16 supervised background services.
+**3 Rust binaries**: Agent (~21MB), API (~25MB), CLI (~3.9MB). Runtime RAM: ~35MB agent + ~14MB API ≈ 49MB for the panel itself; ~109MB with the bundled PostgreSQL. 17 supervised background services.
 
 | Component | Tech | Role |
 |-----------|------|------|
