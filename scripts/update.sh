@@ -454,6 +454,11 @@ else
     log "Building CLI..."
     (cd "$CLI_SRC" && $CARGO_CMD build --release 2>&1 | tail -1)
 
+    if [ -d "$MCP_SRC" ]; then
+        log "Building MCP server..."
+        (cd "$MCP_SRC" && $CARGO_CMD build --release 2>&1 | tail -1)
+    fi
+
     if [ -d "$FRONTEND_DIR" ]; then
         log "Building frontend..."
         # `npm ci` installs EXACTLY the committed package-lock.json — the tree the
