@@ -504,19 +504,38 @@ async fn execute_policy(db: &PgPool, agents: &AgentRegistry, policy: &PolicyRow,
 
     // Backup databases
     if policy.backup_databases {
-        // `s.server_id` comes free from the join this query already makes — the same
+        // `server_id` comes free from the join this query already makes — the same
         // shape `create_db_backup` uses. Without it the panel `docker exec`s whatever
         // answers to `dockpanel-db-{name}` on ITS OWN host, and that name is unique
-        // only per site, so the dump can be another tenant's database entirely.
-        let databases: Vec<(Uuid, String, String, String, String, Uuid)> = sqlx::query_as(
-            "SELECT d.id, d.name, d.engine, d.db_user, d.db_password_enc, s.server_id \
-             FROM databases d JOIN sites s ON d.site_id = s.id WHERE s.user_id = $1"
+        // only per owner, so the dump can be another tenant's database entirely.
+        //
+        // LEFT JOIN both owner tables + COALESCE, same pattern as databases.rs's
+        // list()/get() — a plain `JOIN sites` here silently dropped every
+        // stack-owned database (site_id IS NULL for those rows since v2.242.0's
+        // standalone-DB-for-stacks ship), so they got zero backup coverage,
+        // scheduled or manual, with no error anywhere in the chain.
+        let databases: Vec<(Uuid, String, String, String, String, Option<Uuid>)> = sqlx::query_as(
+            "SELECT d.id, d.name, d.engine, d.db_user, d.db_password_enc, \
+             COALESCE(s.server_id, st.server_id) \
+             FROM databases d \
+             LEFT JOIN sites s ON d.site_id = s.id \
+             LEFT JOIN docker_stacks st ON d.stack_id = st.id \
+             WHERE COALESCE(s.user_id, st.user_id) = $1"
         )
         .bind(policy.user_id)
         .fetch_all(db).await.unwrap_or_default();
 
         for (db_id, db_name, engine, user, password_enc, db_server_id) in &databases {
-            let agent = match agents.for_server(*db_server_id).await {
+            let Some(db_server_id) = *db_server_id else {
+                failures += 1;
+                tracing::warn!(
+                    "Policy '{}': skipping database {db_name} — its owner (site or \
+                     stack) row has no server_id.",
+                    policy.name
+                );
+                continue;
+            };
+            let agent = match agents.for_server(db_server_id).await {
                 Ok(a) => a,
                 Err(e) => {
                     failures += 1;
@@ -575,7 +594,7 @@ async fn execute_policy(db: &PgPool, agents: &AgentRegistry, policy: &PolicyRow,
                         "INSERT INTO database_backups (database_id, server_id, filename, size_bytes, db_type, db_name, encrypted, encryption_key_version, policy_id, destination_id, uploaded, sha256_hash, previous_hash, chain_valid) \
                          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, TRUE)"
                     )
-                    .bind(db_id).bind(*db_server_id).bind(&filename).bind(size_bytes)
+                    .bind(db_id).bind(db_server_id).bind(&filename).bind(size_bytes)
                     .bind(engine).bind(db_name).bind(encrypted).bind(CURRENT_BACKUP_KEY_VERSION).bind(policy.id)
                     .bind(destination.as_ref().map(|d| d.id)).bind(uploaded)
                     .bind(if sha256_hash.is_empty() { None } else { Some(&sha256_hash) })

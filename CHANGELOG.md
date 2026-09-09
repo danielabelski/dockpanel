@@ -4,6 +4,20 @@ All notable changes to DockPanel will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.242.1]
+
+### Fix: stack-owned databases had zero backup coverage
+
+The scheduled/policy backup path (`backup_policy_executor.rs`) still selected candidate databases
+with a plain `JOIN sites`, which silently dropped every stack-owned database added in v2.242.0
+(`site_id IS NULL` for those rows) — so a database created under a Docker Stack got no scheduled
+or manual policy-driven backup at all, with no error anywhere in the chain. Fixed by switching to
+the same `LEFT JOIN` both owner tables + `COALESCE` pattern `databases.rs` already uses for every
+other stack-owned-database route; zero behavior change for existing site-owned databases. Caught by
+re-verifying this session's own prior ship against current source, and confirmed live in a
+rolled-back transaction against the demo database (old query drops the stack-owned row, new query
+resolves it with the correct `server_id`).
+
 ## [2.242.0]
 
 ### Add: standalone database provisioning for Docker Stacks (GH #64)
