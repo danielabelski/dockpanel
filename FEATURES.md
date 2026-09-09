@@ -1,6 +1,6 @@
 # DockPanel Feature Manifest
 
-> **Version**: v2.241.0 | **Total**: 60+ major features, ~285 capabilities
+> **Version**: v2.242.0 | **Total**: 60+ major features, ~285 capabilities
 >
 > This file is the single source of truth for what DockPanel offers.
 > Update it whenever features are added, changed, or removed.
@@ -184,6 +184,7 @@
 |---------|-------------|---------|----------|
 | **Visual Schema Browser** | Tables, columns, indexes, foreign key relationships in one view | `routes/databases.rs` | `Databases.tsx` |
 | **Point-in-Time Recovery** | Retention config only. ⚠ **No WAL archiving and no restore** — see §Withdrawn Claims | `routes/databases.rs` | `Databases.tsx` |
+| **Standalone DB provisioning for Docker Stacks** (GH #64) | A database can be owned by a Docker Stack instead of a Site — for a containerised app with no site to attach a database to. The container joins the stack's own private network (not the shared, ICC-disabled site-DB bridge), so it is directly reachable by name from that stack's own containers. Admin-only, since Stacks are. Deleting the stack removes its databases too. | `routes/databases.rs`, `routes/stacks.rs`, agent `services/database.rs` | `Databases.tsx` |
 
 ## Withdrawn Claims
 
@@ -244,7 +245,7 @@ honest:
 | HTTP routes | 840 (545 backend + 295 agent) | derived | every commit |
 | Regression-pin assertions | 4544 (137 suites) | derived | every commit |
 | Frontend pages | 52 | derived | every commit |
-| DB migrations | 137 | derived | every commit |
+| DB migrations | 138 | derived | every commit |
 | Supervised background services | 17 | derived | every commit |
 
 Five of these were wrong when the register was built (s272), some by a factor of

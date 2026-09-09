@@ -6,9 +6,11 @@ questions about databases have surprising answers, so this guide leads with it.
 
 ## The one thing to know first
 
-**A managed database is reachable from the server itself, and from nothing else.**
+**A database owned by a Site is reachable from the server itself, and from
+nothing else.** (A database owned by a Stack is different — see
+[Databases owned by a Stack](#databases-owned-by-a-stack) below.)
 
-Two mechanisms put it there, and they are both on purpose:
+Two mechanisms put a site-owned database there, and they are both on purpose:
 
 - The container's port is published on the host's **loopback address only**, so
   nothing off-box can reach it.
@@ -16,12 +18,14 @@ Two mechanisms put it there, and they are both on purpose:
   switched off**, so nothing in another container can reach it either.
 
 The practical consequence catches almost everyone once: **a database GUI running
-in its own container cannot connect to a managed database.** Not with the
-internal host, not with `127.0.0.1`, not with any value you can type. Inside that
-GUI's container, `127.0.0.1` is the GUI itself.
+in its own container cannot connect to a site-owned managed database.** Not with
+the internal host, not with `127.0.0.1`, not with any value you can type. Inside
+that GUI's container, `127.0.0.1` is the GUI itself.
 
 This is not a misconfiguration and it is not something to work around lightly. It
-is what stops a compromised container from reaching another tenant's data.
+is what stops a compromised container from reaching another tenant's data — every
+site-owned database container shares this one bridge, so keeping it ICC-off is
+what keeps them from reaching each other too.
 
 ## Engines
 
@@ -71,20 +75,51 @@ ssh -L 5433:127.0.0.1:<port> root@your-server
 # then point your local client at 127.0.0.1:5433
 ```
 
-**From a container** — not possible for a managed database. If you need a
-containerised tool to reach a database, run that database **inside the same
-compose stack** as the tool. Services in one stack share a network and resolve
-each other by service name; that is a different arrangement from a managed
-database and it is the right one for that job.
+**From a container** — not possible for a **site-owned** managed database. If you
+need a containerised tool to reach one, either run a plain database container
+**inside the same compose stack** as the tool (services in one stack share a
+network and resolve each other by service name), or provision a **Stack-owned
+managed database** instead — see below, which gives you the panel's own
+credentials, backups and SQL browser while staying reachable by name from that
+stack's own containers.
 
 ### Adminer, phpMyAdmin, and the other GUI templates
 
-The app catalogue includes database GUIs. They work — but **not against a managed
-database**, for the reasons at the top of this guide. Pointing one at a managed
-database will fail no matter what you type.
+The app catalogue includes database GUIs. They work against a **Stack-owned**
+managed database (see below) if deployed into the same stack, or against a plain
+database container you run in your own stack. They do **not** work against a
+**site-owned** managed database, for the reasons at the top of this guide —
+pointing one at a site-owned database will fail no matter what you type.
 
-Use them for a database you run inside a compose stack. For managed databases,
-use the built-in SQL browser below, or a client over an SSH tunnel.
+## Databases owned by a Stack
+
+A database can also be provisioned against a **Docker Stack** instead of a Site
+— for a containerised app that needs a real, panel-managed database (credentials,
+backups, the SQL browser) without a site to attach it to. Pick **"Owned by a
+Stack"** on the Create Database form.
+
+This is deliberately **not** available for a bare, single-container Docker App —
+only for a Stack (a multi-container compose deployment). Docker Apps have no
+database row of their own in the panel at all; extending that would be a bigger
+change than provisioning a database for something that already does.
+
+**Stacks are admin-only**, so this option only appears for an administrator, and
+only once at least one stack exists to pick from.
+
+The container joins **that stack's own private network** — the same one its
+other services already use to resolve each other by name — instead of the shared,
+inter-container-communication-disabled bridge a site-owned database uses. That
+means, unlike a site-owned database, **a Stack-owned database IS reachable by
+name from the stack's own containers**: point your app at the database's name
+(shown as **Internal Host** in its credentials panel) and the port it listens on
+inside the container (5432 for PostgreSQL, 3306 for MariaDB/MySQL) — no extra
+networking to configure. It is not reachable from outside that stack, the same
+way a site-owned database is not reachable from outside the host.
+
+Everything else works identically to a site-owned database: the SQL browser,
+credential reset, backups, and Import. Deleting the stack deletes its databases
+along with it — the panel tears down the database container as part of removing
+the stack, the same as it does the stack's other containers.
 
 ## The built-in SQL browser
 
@@ -108,9 +143,11 @@ outright rather than returning the first 1000 rows. Select the columns you need.
 **The query runner is not read-only.** You are connected as the database's owner,
 so `UPDATE`, `DELETE` and `DROP` all execute. There is no confirmation step.
 
-Access is by **site ownership**, not by role: whoever owns the site owns its
-databases. An administrator who does not own the site does not get access to its
-SQL browser through this route.
+Access is by **ownership**, not by role: whoever owns the site (or, for a
+Stack-owned database, the stack) owns its databases. An administrator who does
+not own the site does not get access to its SQL browser through this route —
+Stack ownership is moot here in practice, since only an administrator can own a
+stack in the first place.
 
 ## Backups
 
@@ -197,10 +234,11 @@ dockpanel backup db-list mydb        # shows importable dumps, and rejected ones
 
 Being explicit, so you do not go looking:
 
-- **No database GUI that works against a managed database from a container.**
-  Covered above; this is a design decision, not a gap.
-- **Managed databases belong to sites, not to Docker apps.** If you want a
-  standalone database for a container to use, run it in the app's own compose
-  stack.
+- **No database GUI that works against a site-owned managed database from a
+  container.** Covered above; this is a design decision, not a gap.
+- **No managed database for a bare, single-container Docker App.** Only Sites
+  and Stacks can own one — see [Databases owned by a Stack](#databases-owned-by-a-stack).
+  If you want a standalone database for a plain Docker App, run it in the app's
+  own compose stack, or convert the app to a Stack first.
 - **No cross-server database access.** A database is reachable on the machine
   that runs it.

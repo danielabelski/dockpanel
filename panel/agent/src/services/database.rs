@@ -18,18 +18,44 @@ pub struct DbContainer {
 }
 
 /// Create a database container (MySQL or PostgreSQL).
+///
+/// `stack_id`, when set (GH #64: standalone DB provisioning for a Docker Stack
+/// instead of a Site), puts the container on that stack's OWN private bridge
+/// network — the same one `compose::deploy_stack` already gives the stack's other
+/// containers, which is how they reach each other by name — instead of the shared,
+/// ICC-disabled `dockpanel-db` bridge every site-owned database joins. Mirrors
+/// `app_sidecar.rs`'s own design: host-port publishing does not care which
+/// bridge-driver network a container is on, so the existing `127.0.0.1:{port}`
+/// publish below keeps working unchanged either way, and every panel-side
+/// query/backup/credential operation reaches the container via `docker exec`
+/// (never a TCP connection to that published port), which is unaffected by
+/// network membership too. A stack's network is single-tenant by construction
+/// (one `user_id` owns the stack), so this introduces no new cross-tenant
+/// exposure — it simply swaps one single-purpose bridge for another.
 pub async fn create_database(
     name: &str,
     engine: &str,
     password: &str,
     port: u16,
+    stack_id: Option<&str>,
 ) -> Result<DbContainer, String> {
     let docker =
         Docker::connect_with_local_defaults().map_err(|e| format!("Docker connect failed: {e}"))?;
 
-    // Ensure the shared DB bridge exists AND has inter-container communication
-    // disabled (H2: block cross-tenant lateral movement between DB containers).
-    ensure_network(&docker).await?;
+    let network_mode = match stack_id {
+        Some(sid) => {
+            let network = crate::services::compose::stack_network_name(Some(sid));
+            crate::services::compose::ensure_stack_network(&docker, &network, Some(sid)).await?;
+            network
+        }
+        None => {
+            // Ensure the shared DB bridge exists AND has inter-container
+            // communication disabled (H2: block cross-tenant lateral movement
+            // between DB containers).
+            ensure_network(&docker).await?;
+            DB_NETWORK.to_string()
+        }
+    };
 
     // M1: for postgres the container's bootstrap superuser (`postgres`) gets a
     // random, immediately-discarded password. The tenant NEVER connects as the
@@ -93,7 +119,7 @@ pub async fn create_database(
 
     let host_config = bollard::service::HostConfig {
         port_bindings: Some(port_bindings),
-        network_mode: Some(DB_NETWORK.to_string()),
+        network_mode: Some(network_mode),
         restart_policy: Some(bollard::service::RestartPolicy {
             name: Some(bollard::service::RestartPolicyNameEnum::UNLESS_STOPPED),
             ..Default::default()
@@ -115,11 +141,25 @@ pub async fn create_database(
         env: Some(env.clone()),
         exposed_ports: Some(exposed_ports),
         host_config: Some(host_config),
-        labels: Some(HashMap::from([
-            ("dockpanel.managed".to_string(), "true".to_string()),
-            ("dockpanel.db.name".to_string(), name.to_string()),
-            ("dockpanel.db.engine".to_string(), engine.to_string()),
-        ])),
+        labels: Some({
+            let mut labels = HashMap::from([
+                ("dockpanel.managed".to_string(), "true".to_string()),
+                ("dockpanel.db.name".to_string(), name.to_string()),
+                ("dockpanel.db.engine".to_string(), engine.to_string()),
+            ]);
+            // This label does NOT make stack teardown find this container — it is
+            // deliberately absent from `list_deployed_apps()` (no `dockpanel.app.*`
+            // labels, same "operator manages exactly one thing" exclusion
+            // `app_sidecar.rs`'s sidecar containers use), so the backend's own
+            // stack-delete route removes it explicitly by `databases.stack_id`
+            // instead. Labelled here for operator visibility (`docker inspect`/
+            // `docker ps --filter`) and so a future stack-scoped tool has
+            // something to key on.
+            if let Some(sid) = stack_id {
+                labels.insert("dockpanel.stack_id".to_string(), sid.to_string());
+            }
+            labels
+        }),
         ..Default::default()
     };
 

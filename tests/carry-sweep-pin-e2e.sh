@@ -292,11 +292,14 @@ has "G8d with a 15-character stamp" "$F_ADBS" "stamp.len()==15"
 has "G9 and only when it emptied the directory" "$F_ADBS" "ifkept==0{"
 eq "G10 the route is registered" "$(occ "$F_ADBR" 'route("/db-backups/{db_name}",delete(purge))')" 1
 # ⛔ THE HAZARD THE REGISTER NEVER NAMED. The directory is keyed by NAME while the
-# name is unique only per SITE, so two live databases can share one. Purging on
-# the first delete destroys the survivor's backups.
-has "G11 the panel asks whether anything still uses the name" "$F_DBR" "SELECTEXISTS(SELECT1FROMdatabasesdJOINsitessONs.id=d.site_id"
+# name is unique only per SITE (or, since GH #64's standalone-DB provisioning, per
+# STACK), so two live databases can share one. Purging on the first delete destroys
+# the survivor's backups. LEFT JOIN both owner tables + COALESCE (chk_databases_owner
+# guarantees exactly one of site_id/stack_id is set per row) so a stack-owned database
+# is covered by the same "doubt keeps the files" check a site-owned one always was.
+has "G11 the panel asks whether anything still uses the name" "$F_DBR" "SELECTEXISTS(SELECT1FROMdatabasesdLEFTJOINsitessONs.id=d.site_idLEFTJOINdocker_stacksstONst.id=d.stack_id"
 has "G12 scoped to this host, counting an unplaced row as possibly-here" \
-    "$F_DBR" "WHEREd.name=\$1AND(s.server_id=\$2ORs.server_idISNULL)"
+    "$F_DBR" "WHEREd.name=\$1AND(COALESCE(s.server_id,st.server_id)=\$2ORCOALESCE(s.server_id,st.server_id)ISNULL))"
 has "G13 doubt keeps the files" "$F_DBR" "unwrap_or(true);"
 has "G14 and a shared name is not purged" "$F_DBR" "ifshared{"
 # The write half of the same charset split: a `_`-named database could not even be

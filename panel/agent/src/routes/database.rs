@@ -15,6 +15,10 @@ struct CreateDbRequest {
     engine: String,
     password: String,
     port: Option<u16>,
+    /// GH #64 (standalone DB provisioning): when set, the container joins this
+    /// stack's own private network instead of the shared `dockpanel-db` bridge.
+    /// See `database::create_database`'s doc comment for the full rationale.
+    stack_id: Option<String>,
 }
 
 /// Find an available port for a database container.
@@ -88,7 +92,13 @@ async fn create(
         })?,
     };
 
-    let db = database::create_database(&body.name, &body.engine, &body.password, port)
+    let db = database::create_database(
+        &body.name,
+        &body.engine,
+        &body.password,
+        port,
+        body.stack_id.as_deref(),
+    )
         .await
         .map_err(|e| {
             (

@@ -8,9 +8,18 @@ interface Site {
   domain: string;
 }
 
+// A Docker Stack a database can be provisioned against instead of a Site
+// (GH #64: standalone DB provisioning for Docker Apps). Stacks are admin-only
+// throughout the panel, so this list is only ever fetched/shown for admins.
+interface Stack {
+  id: string;
+  name: string;
+}
+
 interface Database {
   id: string;
-  site_id: string;
+  site_id: string | null;
+  stack_id: string | null;
   name: string;
   engine: string;
   db_user: string;
@@ -886,13 +895,18 @@ chmod 600 ${dir}/dump.sql.gz`}
 export default function Databases() {
   const [databases, setDatabases] = useState<Database[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
+  const [stacks, setStacks] = useState<Stack[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
 
-  // Form state
+  // Form state. GH #64: a database is now owned by a Site OR a Stack — never both
+  // (chk_databases_owner). Stacks are admin-only throughout the panel, so ownerType
+  // only ever offers "stack" for admins; a non-admin's request is unaffected.
+  const [ownerType, setOwnerType] = useState<"site" | "stack">("site");
   const [siteId, setSiteId] = useState("");
+  const [stackId, setStackId] = useState("");
   const [dbName, setDbName] = useState("");
   const [engine, setEngine] = useState("postgres");
   const [submitting, setSubmitting] = useState(false);
@@ -928,12 +942,16 @@ export default function Databases() {
 
   const fetchData = async () => {
     try {
-      const [dbs, sitesData] = await Promise.all([
+      const [dbs, sitesData, stacksData] = await Promise.all([
         api.get<Database[]>("/databases"),
         api.get<Site[]>("/sites"),
+        // Stacks are admin-only server-side (require_admin) — skip the call
+        // entirely for non-admins rather than surfacing its 403 as a page error.
+        isAdmin ? api.get<Stack[]>("/stacks") : Promise.resolve([] as Stack[]),
       ]);
       setDatabases(dbs);
       setSites(sitesData);
+      setStacks(stacksData);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load data");
     } finally {
@@ -943,7 +961,8 @@ export default function Databases() {
 
   useEffect(() => {
     fetchData();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin]);
 
   const handleCreate = async (e: FormEvent) => {
     e.preventDefault();
@@ -952,7 +971,8 @@ export default function Databases() {
     setSubmitting(true);
     try {
       await api.post("/databases", {
-        site_id: siteId,
+        site_id: ownerType === "site" ? siteId : undefined,
+        stack_id: ownerType === "stack" ? stackId : undefined,
         name: dbName,
         engine,
       });
@@ -1047,6 +1067,12 @@ export default function Databases() {
   const getSiteDomain = (siteId: string) =>
     sites.find((s) => s.id === siteId)?.domain || "Unknown";
 
+  const getStackName = (stackId: string) =>
+    stacks.find((s) => s.id === stackId)?.name || "Unknown stack";
+
+  const getOwnerLabel = (db: Database) =>
+    db.stack_id ? getStackName(db.stack_id) : getSiteDomain(db.site_id ?? "");
+
   // Schema Browser mode
   if (schemaDb) {
     return (
@@ -1132,34 +1158,96 @@ export default function Databases() {
           onSubmit={handleCreate}
           className="bg-dark-800 rounded-lg border border-dark-500 p-5 mb-6 space-y-4"
         >
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label htmlFor="db-site" className="block text-sm font-medium text-dark-100 mb-1">
-                Site
-              </label>
-              <select
-                id="db-site"
-                value={siteId}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setSiteId(val);
-                  if (val) {
-                    const selectedSite = sites.find((s) => s.id === val);
-                    if (selectedSite) {
-                      setDbName(selectedSite.domain.replace(/\./g, '_').replace(/-/g, '_'));
-                    }
-                  }
-                }}
-                className="w-full px-3 py-2.5 border border-dark-500 rounded-lg focus:ring-2 focus:ring-accent-500 focus:border-accent-500 outline-none text-sm bg-dark-800"
-              >
-                <option value="">-- Select a site --</option>
-                {sites.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.domain}
-                  </option>
-                ))}
-              </select>
+          {/* Owner type toggle — Stacks are admin-only throughout the panel, so this
+              only appears once the operator has at least one to pick from. Everyone
+              else keeps the plain Site picker unchanged. */}
+          {isAdmin && stacks.length > 0 && (
+            <div className="flex gap-2" role="radiogroup" aria-label="Database owner type">
+              {(["site", "stack"] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  role="radio"
+                  aria-checked={ownerType === t}
+                  onClick={() => {
+                    setOwnerType(t);
+                    setSiteId("");
+                    setStackId("");
+                    setDbName("");
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                    ownerType === t
+                      ? "bg-rust-500/10 text-rust-400 border-rust-500/30"
+                      : "text-dark-300 border-dark-600 hover:text-dark-100 hover:border-dark-400"
+                  }`}
+                >
+                  {t === "site" ? "Owned by a Site" : "Owned by a Stack"}
+                </button>
+              ))}
             </div>
+          )}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {ownerType === "site" ? (
+              <div>
+                <label htmlFor="db-site" className="block text-sm font-medium text-dark-100 mb-1">
+                  Site
+                </label>
+                <select
+                  id="db-site"
+                  value={siteId}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setSiteId(val);
+                    if (val) {
+                      const selectedSite = sites.find((s) => s.id === val);
+                      if (selectedSite) {
+                        setDbName(selectedSite.domain.replace(/\./g, '_').replace(/-/g, '_'));
+                      }
+                    }
+                  }}
+                  className="w-full px-3 py-2.5 border border-dark-500 rounded-lg focus:ring-2 focus:ring-accent-500 focus:border-accent-500 outline-none text-sm bg-dark-800"
+                >
+                  <option value="">-- Select a site --</option>
+                  {sites.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.domain}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div>
+                <label htmlFor="db-stack" className="block text-sm font-medium text-dark-100 mb-1">
+                  Stack
+                </label>
+                <select
+                  id="db-stack"
+                  value={stackId}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setStackId(val);
+                    if (val) {
+                      const selectedStack = stacks.find((s) => s.id === val);
+                      if (selectedStack) {
+                        setDbName(selectedStack.name.replace(/[^a-zA-Z0-9]/g, '_'));
+                      }
+                    }
+                  }}
+                  className="w-full px-3 py-2.5 border border-dark-500 rounded-lg focus:ring-2 focus:ring-accent-500 focus:border-accent-500 outline-none text-sm bg-dark-800"
+                >
+                  <option value="">-- Select a stack --</option>
+                  {stacks.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-dark-300 mt-1">
+                  Reachable from the stack's own containers at this database's name — no
+                  extra networking to configure.
+                </p>
+              </div>
+            )}
             <div>
               <label htmlFor="db-name" className="block text-sm font-medium text-dark-100 mb-1">
                 Database Name
@@ -1257,7 +1345,7 @@ export default function Databases() {
                     Engine
                   </th>
                   <th scope="col" className="text-left text-xs font-medium text-dark-200 uppercase tracking-widest font-mono px-5 py-3 hidden md:table-cell">
-                    Site
+                    Owner
                   </th>
                   <th scope="col" className="text-left text-xs font-medium text-dark-200 uppercase tracking-widest font-mono px-5 py-3 hidden sm:table-cell">
                     Port
@@ -1283,7 +1371,7 @@ export default function Databases() {
                       {engineLabels[db.engine] || db.engine}
                     </td>
                     <td className="px-5 py-4 text-sm text-dark-200 hidden md:table-cell font-mono">
-                      {getSiteDomain(db.site_id)}
+                      {getOwnerLabel(db)}
                     </td>
                     <td className="px-5 py-4 text-sm text-dark-200 font-mono hidden sm:table-cell">
                       {db.port || "\u2014"}

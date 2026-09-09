@@ -548,7 +548,7 @@ fn parse_ports(ports_val: &Option<Vec<serde_yaml_ng::Value>>) -> Vec<PortMapping
 ///
 /// Labelled with the stack id so teardown can prove the network is ours before
 /// removing it, in the shape [`crate::services::ownership`] applies to files.
-async fn ensure_stack_network(docker: &Docker, network: &str, stack_id: Option<&str>) -> Result<(), String> {
+pub(crate) async fn ensure_stack_network(docker: &Docker, network: &str, stack_id: Option<&str>) -> Result<(), String> {
     if docker.inspect_network::<String>(network, None).await.is_ok() {
         return Ok(());
     }

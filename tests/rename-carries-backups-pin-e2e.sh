@@ -199,7 +199,7 @@ has "H3 the purge is reached from site delete" "$F_BREMOVE" 'purge_dumps_if_uncl
 before "H4 the purge runs AFTER the cascade" "$F_BREMOVE" \
   'DELETEFROMsitesWHEREid=$1' 'purge_dumps_if_unclaimed('
 has "H5 doubt still keeps the files"         "$F_PURGE" '.unwrap_or(true);'
-has "H6 and the probe still asks about this host" "$F_PURGE" 'WHEREd.name=$1AND(s.server_id=$2ORs.server_idISNULL)'
+has "H6 and the probe still asks about this host" "$F_PURGE" 'WHEREd.name=$1AND(COALESCE(s.server_id,st.server_id)=$2ORCOALESCE(s.server_id,st.server_id)ISNULL))'
 
 echo "── §I  the one database name that collides with its own route"
 has "I1 the static path has a handler that needs no capture" "$F_ADBRRT" '.route("/db-backups/dump",post(dump).delete(purge_dump))'

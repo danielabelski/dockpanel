@@ -4,6 +4,44 @@ All notable changes to DockPanel will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.242.0]
+
+### Add: standalone database provisioning for Docker Stacks (GH #64)
+
+A database can now be owned by a Docker Stack instead of a Site — for a containerised app that
+needs a real, panel-managed database (credentials, backups, SQL browser) without a site to attach
+it to. Previously `databases.site_id` was `NOT NULL` end-to-end, so nothing outside a site could
+ever get one; the maintainer's own reply on #64 had pointed reporters at a raw `db:` service in
+their own compose file as a workaround, which works for connectivity but gets none of the panel's
+own database features.
+
+- **New `databases.stack_id`**, mutually exclusive with `site_id` (`chk_databases_owner`), rather
+  than a generic polymorphic owner column — every other multi-owner table in this codebase uses a
+  concrete nullable FK + CHECK, never a generic pair, and this keeps `ON DELETE CASCADE`
+  expressible. Every route that used to join `sites` alone now resolves the owner through either
+  table via `COALESCE`, one query, no behavior change for existing site-owned databases.
+- **The container joins the stack's own private network** (already used to give a stack's other
+  services name-based reachability) instead of the shared, inter-container-communication-disabled
+  bridge a site-owned database uses — so, unlike a site-owned database, a stack-owned one **is**
+  directly reachable by name from that stack's own containers, with nothing extra to configure.
+  Every panel-side query/backup/credential-reset operation already reaches a database container via
+  `docker exec`, not a TCP connection to its published port, so this change doesn't touch any of
+  that — a stack's network is single-tenant by construction, so it's no new cross-tenant exposure
+  either, just one single-purpose bridge swapped for another.
+- **Deleting a stack now also removes any database it owns.** Live-testing this surfaced a real
+  ordering bug the code review missed: the stack's own network teardown ran BEFORE the database
+  container was removed, so Docker correctly refused to delete a network that still had an
+  attachment — the network was silently left behind. Fixed by removing the database container
+  first.
+- Admin-only, since Docker Stacks are admin-only throughout the panel; the Create Database form
+  only shows the Site/Stack picker once at least one stack exists to choose from.
+- Live-verified end to end on this box's own demo instance: create stack → create standalone DB →
+  confirm the container is on the stack's network and reachable by name from a sibling container,
+  not on the shared bridge → query/credentials/tables endpoints still work → delete the DB directly
+  (container + row gone) → create a second DB, delete the STACK instead (DB container, DB row, and
+  the stack's network all gone; the earlier ordering bug caught and fixed on this exact run) →
+  regression-tested the original site-owned path end to end alongside it (unchanged).
+
 ## [2.241.0]
 
 ### Add: MCP server, session 2 — the full v1 tool catalogue, Settings UI, and a stale-copy fix

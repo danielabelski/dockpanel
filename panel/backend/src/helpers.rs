@@ -168,6 +168,12 @@ pub const SITE_CALLER_PREDICATE: &str = "s.id = $1 AND (s.user_id = $2 OR EXISTS
     SELECT 1 FROM users u, servers sv WHERE u.id = $2 AND u.role = 'admin' \
     AND sv.id = s.server_id AND (sv.is_local OR sv.user_id = u.id)))";
 
+/// Same shape as [`SITE_CALLER_PREDICATE`], for `docker_stacks` — a database can now be
+/// owned by a stack instead of a site (GH #64: standalone DB provisioning for Docker Apps).
+pub const STACK_CALLER_PREDICATE: &str = "st.id = $1 AND (st.user_id = $2 OR EXISTS (\
+    SELECT 1 FROM users u, servers sv WHERE u.id = $2 AND u.role = 'admin' \
+    AND sv.id = st.server_id AND (sv.is_local OR sv.user_id = u.id)))";
+
 // ── Suspension: the role an account gets back ───────────────────────────────
 //
 // Suspending overwrites `users.role`, which is the only record of what the

@@ -703,6 +703,36 @@ pub async fn remove(
     )
     .await?;
 
+    // A stack's own database (if any — GH #64: standalone DB provisioning) MUST be torn
+    // down BEFORE `/apps/stack/action` (remove) below, not after: that call's own remove
+    // branch tears down the stack's Docker network as its LAST step
+    // (`compose::remove_stack_network`), and Docker refuses to remove a network that
+    // still has an attached endpoint. A database container joins that SAME network
+    // (`create_database`'s own doc comment), so removing it after the network step runs
+    // leaves the network silently orphaned — live-caught: the network survived past a
+    // stack delete on this exact box until this ordering fix. The container also is NOT
+    // among the containers `/apps/stack/action` removes on its own: it carries
+    // `dockpanel.db.*` labels rather than `dockpanel.app.*`, so it is not in
+    // `list_deployed_apps()` at all — the same "operator manages exactly one thing"
+    // exclusion `app_sidecar.rs`'s sidecar containers use. The `databases` row is left to
+    // `stack_id`'s ON DELETE CASCADE below (a cascaded row delete never touches the live
+    // container, which is exactly why the container needs this explicit step). Best-effort,
+    // same tolerance the stack's own containers get below ("even if container removal had
+    // partial failures").
+    let owned_dbs: Vec<(Option<String>,)> =
+        sqlx::query_as("SELECT container_id FROM databases WHERE stack_id = $1")
+            .bind(id)
+            .fetch_all(&state.db)
+            .await
+            .unwrap_or_default();
+    for (container_id,) in owned_dbs {
+        if let Some(cid) = container_id.filter(|c| !c.is_empty())
+            && let Err(e) = agent.delete(&format!("/databases/{cid}")).await
+        {
+            tracing::warn!("Could not remove stack {id}'s database container {cid}: {e}");
+        }
+    }
+
     // Remove all containers, and the vhost/certs the stack was fronted by. The
     // agent proves ownership of each before deleting it.
     let result = agent
